@@ -95,7 +95,10 @@ export function createMcpServer(config: Config): Server {
   const writeEnum = writableSources.map((s) => s.name);
   const readEnum = config.sources.map((s) => s.name);
   const baseUrl = `http://${config.host}:${config.port}`;
-  const viewerUrl = config.tailscaleUrl ?? baseUrl;
+
+  function viewerUrl(): string {
+    return (config.tailscaleUrl ?? baseUrl).replace(/\/+$/, "");
+  }
 
   // Resources — loaded into agent context automatically
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
@@ -121,14 +124,14 @@ export function createMcpServer(config: Config): Server {
       const text = [
         `Markdown & Mermaid Diagram Viewer`,
         ``,
-        `Viewer URL: ${viewerUrl}`,
+        `Viewer URL: ${viewerUrl()}`,
         `Local URL: ${baseUrl}`,
         ``,
         `Configured sources:`,
         sourceDesc,
         ``,
         `When you create or update a plan file, tell the user they can view it at:`,
-        `  ${viewerUrl}/plans/{plan-name}`,
+        `  ${viewerUrl()}/plans/{plan-name}`,
         `where {plan-name} is the filename without .md. The viewer renders Mermaid diagrams and live-reloads on file changes.`,
         ``,
         `For ad-hoc diagrams or documents outside of plans, use the write_document MCP tool to write to a writable source (e.g. "temp").`,
@@ -155,7 +158,7 @@ export function createMcpServer(config: Config): Server {
       {
         name: "write_document",
         description:
-          `Write a markdown document to a source directory. Validates mermaid blocks and returns the viewer URL. Writable sources: ${writableSources.map((s) => `${s.name} (${s.directory})`).join(", ")}. The "plans" source is read-only — Claude Code writes plan files there natively. Viewer: ${viewerUrl}`,
+          `Write a markdown document to a source directory. Validates mermaid blocks and returns the viewer URL. Writable sources: ${writableSources.map((s) => `${s.name} (${s.directory})`).join(", ")}. The "plans" source is read-only — Claude Code writes plan files there natively. Viewer: ${viewerUrl()}`,
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -186,7 +189,7 @@ export function createMcpServer(config: Config): Server {
       {
         name: "edit_document",
         description:
-          `Edit an existing markdown document with one or more text replacements. Validates mermaid blocks after edit. Writable sources: ${writableSources.map((s) => `${s.name} (${s.directory})`).join(", ")}. Viewer: ${viewerUrl}`,
+          `Edit an existing markdown document with one or more text replacements. Validates mermaid blocks after edit. Writable sources: ${writableSources.map((s) => `${s.name} (${s.directory})`).join(", ")}. Viewer: ${viewerUrl()}`,
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -337,7 +340,7 @@ export function createMcpServer(config: Config): Server {
         }
 
         const viewName = filename.endsWith(".md") ? filename.slice(0, -3) : filename;
-        const url = `${viewerUrl}/${source}/${viewName}`;
+        const url = `${viewerUrl()}/${source}/${viewName}`;
         const errors = await validateMermaidBlocks(content);
         const result = formatValidationResult(
           `Written to ${filename}. View at ${url}`,
@@ -438,7 +441,7 @@ export function createMcpServer(config: Config): Server {
         }
 
         const viewName = filename.endsWith(".md") ? filename.slice(0, -3) : filename;
-        const url = `${viewerUrl}/${source}/${viewName}`;
+        const url = `${viewerUrl()}/${source}/${viewName}`;
         const errors = await validateMermaidBlocks(content);
 
         if (dryRun) {

@@ -85,55 +85,44 @@ async function main() {
     console.log(`  ${source.name} → ${source.directory}`);
   }
 
-  if (config.tailscale) {
+  if (config.tailscale && !config.tailscaleUrl) {
     config.tailscaleUrl = await setupTailscale(config.port);
+  }
+  if (config.tailscaleUrl) {
+    console.log(`Tailscale: ${config.tailscaleUrl}`);
   }
 }
 
 async function setupTailscale(port: number): Promise<string | undefined> {
-  const localUrl = `http://localhost:${port}`;
-
   try {
-    await execFileAsync("tailscale", ["serve", "--bg", localUrl]);
-
+    // Try to register the serve proxy (works from interactive shells,
+    // may fail under launchd due to GUI IPC restrictions)
     try {
-      const { stdout: statusJson } = await execFileAsync("tailscale", [
-        "status",
-        "--json",
-      ]);
-      const status = JSON.parse(statusJson) as { Self?: { DNSName?: string } };
-      const dnsName = status.Self?.DNSName?.replace(/\.$/, "");
-      if (dnsName) {
-        const url = `https://${dnsName}/`;
-        console.log(`Tailscale: ${url}`);
-        return url;
-      } else {
-        console.log("Tailscale serve enabled");
-      }
+      await execFileAsync("tailscale", ["serve", "--bg", `http://localhost:${port}`]);
     } catch {
-      console.log("Tailscale serve enabled");
+      // If serve --bg fails (common under launchd), that's OK —
+      // the user can run it once manually. We just need the hostname.
+    }
+
+    // Get the Tailscale hostname to construct the viewer URL
+    const { stdout } = await execFileAsync("tailscale", ["status", "--json"]);
+    const status = JSON.parse(stdout) as { Self?: { DNSName?: string } };
+    const dnsName = status.Self?.DNSName?.replace(/\.$/, "");
+    if (dnsName) {
+      const url = `https://${dnsName}/`;
+      console.log(`Tailscale: ${url}`);
+      return url;
     }
   } catch (error: unknown) {
     if (isCommandNotFound(error)) {
       console.warn(
         "Warning: tailscale command not found. Continuing without Tailscale.",
       );
-      return undefined;
+    } else {
+      console.warn("Warning: Tailscale setup failed:", (error as Error).message);
     }
-    throw error;
   }
-
-  const cleanup = async () => {
-    try {
-      await execFileAsync("tailscale", ["serve", "--remove", localUrl]);
-    } catch {
-      // Best-effort cleanup on exit
-    }
-    process.exit(0);
-  };
-
-  process.on("SIGINT", () => void cleanup());
-  process.on("SIGTERM", () => void cleanup());
+  return undefined;
 }
 
 function isCommandNotFound(error: unknown) {

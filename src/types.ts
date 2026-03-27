@@ -15,6 +15,6 @@ export interface Config {
   port: number;
   host: string;
   tailscale: boolean;
-  /** Set by main.ts after Tailscale setup resolves the public URL */
+  /** Explicit Tailscale URL override. Set by config file or resolved at runtime. */
   tailscaleUrl?: string;
 }
