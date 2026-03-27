@@ -83,7 +83,7 @@ export function createMcpServer(config: Config): Server {
     { capabilities: { tools: {} } },
   );
 
-  const sourceNames = config.sources.map((s) => s.name).join(", ");
+  const sourceList = config.sources.map((s) => `${s.name} (${s.directory})`).join(", ");
   const sourceEnum = config.sources.map((s) => s.name);
   const baseUrl = `http://${config.host}:${config.port}`;
 
@@ -92,7 +92,7 @@ export function createMcpServer(config: Config): Server {
       {
         name: "write_document",
         description:
-          `Write a markdown document to a source directory. Validates mermaid blocks and returns the viewer URL. Available sources: ${sourceNames}. Viewer: ${baseUrl}`,
+          `Write a markdown document to a source directory. Validates mermaid blocks and returns the viewer URL. Available sources: ${sourceList}. Viewer: ${baseUrl}`,
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -123,7 +123,7 @@ export function createMcpServer(config: Config): Server {
       {
         name: "edit_document",
         description:
-          `Edit an existing markdown document with one or more text replacements. Validates mermaid blocks after edit. Available sources: ${sourceNames}. Viewer: ${baseUrl}`,
+          `Edit an existing markdown document with one or more text replacements. Validates mermaid blocks after edit. Available sources: ${sourceList}. Viewer: ${baseUrl}`,
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -171,7 +171,7 @@ export function createMcpServer(config: Config): Server {
       },
       {
         name: "read_document",
-        description: `Read the raw markdown content of a document. Available sources: ${sourceNames}.`,
+        description: `Read the raw markdown content of a document. Available sources: ${sourceList}.`,
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -194,7 +194,7 @@ export function createMcpServer(config: Config): Server {
       },
       {
         name: "list_documents",
-        description: `List all markdown documents in a source directory. Available sources: ${sourceNames}.`,
+        description: `List all markdown documents in a source directory. Available sources: ${sourceList}.`,
         inputSchema: {
           type: "object" as const,
           properties: {
