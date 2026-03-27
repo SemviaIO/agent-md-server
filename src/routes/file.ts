@@ -1,37 +1,42 @@
-import { Hono } from "hono";
+import type { FastifyInstance } from "fastify";
 
 import { readMarkdown } from "../fs.js";
 import type { SourceConfig } from "../types.js";
 
-export function createFileRoutes(sources: SourceConfig[]) {
-  const app = new Hono();
-
-  app.get("/api/:source/:file", async (c) => {
-    const sourceName = c.req.param("source");
-    const filename = c.req.param("file");
+export function registerFileRoutes(
+  app: FastifyInstance,
+  sources: SourceConfig[],
+): void {
+  app.get("/api/:source/:file", async (request, reply) => {
+    const { source: sourceName, file: filename } = request.params as {
+      source: string;
+      file: string;
+    };
     const source = sources.find((s) => s.name === sourceName);
 
     if (!source) {
-      return c.json({ error: `Source "${sourceName}" not found` }, 404);
+      return reply
+        .status(404)
+        .send({ error: `Source "${sourceName}" not found` });
     }
 
     try {
       const content = await readMarkdown(source.directory, filename);
-      return c.text(content, 200, {
-        "Content-Type": "text/markdown; charset=utf-8",
-      });
+      return reply
+        .header("Content-Type", "text/markdown; charset=utf-8")
+        .send(content);
     } catch (error: unknown) {
       if (error instanceof Error) {
         if ("code" in error && error.code === "ENOENT") {
-          return c.json({ error: `File "${filename}" not found` }, 404);
+          return reply
+            .status(404)
+            .send({ error: `File "${filename}" not found` });
         }
         if (error.message.includes("Path traversal")) {
-          return c.json({ error: "Forbidden" }, 403);
+          return reply.status(403).send({ error: "Forbidden" });
         }
       }
-      return c.json({ error: "Internal server error" }, 500);
+      return reply.status(500).send({ error: "Internal server error" });
     }
   });
-
-  return app;
 }

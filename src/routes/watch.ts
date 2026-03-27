@@ -1,45 +1,47 @@
-import { Hono } from "hono";
-import { streamSSE } from "hono/streaming";
+import type { FastifyInstance } from "fastify";
 
 import { readMarkdown, watchFile } from "../fs.js";
 import type { SourceConfig } from "../types.js";
 
-export function createWatchRoutes(sources: SourceConfig[]) {
-  const app = new Hono();
-
-  app.get("/events/:source/:file", async (c) => {
-    const sourceName = c.req.param("source");
-    const filename = c.req.param("file");
+export function registerWatchRoutes(
+  app: FastifyInstance,
+  sources: SourceConfig[],
+): void {
+  app.get("/events/:source/:file", async (request, reply) => {
+    const { source: sourceName, file: filename } = request.params as {
+      source: string;
+      file: string;
+    };
     const source = sources.find((s) => s.name === sourceName);
 
     if (!source) {
-      return c.json({ error: `Source "${sourceName}" not found` }, 404);
+      return reply
+        .status(404)
+        .send({ error: `Source "${sourceName}" not found` });
     }
 
     // Validate the file exists before setting up the watcher
     try {
       await readMarkdown(source.directory, filename);
     } catch {
-      return c.json({ error: `File "${filename}" not found` }, 404);
+      return reply
+        .status(404)
+        .send({ error: `File "${filename}" not found` });
     }
 
-    return streamSSE(c, async (stream) => {
-      const cleanup = watchFile(source.directory, filename, () => {
-        stream.writeSSE({ data: "changed" }).catch(() => {
-          // Stream may already be closed; ignore write errors
-        });
-      });
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    reply.hijack();
 
-      stream.onAbort(() => {
-        cleanup();
-      });
+    const cleanup = watchFile(source.directory, filename, () => {
+      reply.raw.write("data: changed\n\n");
+    });
 
-      // Keep the stream open until the client disconnects
-      while (!stream.aborted) {
-        await stream.sleep(30_000);
-      }
+    request.raw.on("close", () => {
+      cleanup();
     });
   });
-
-  return app;
 }

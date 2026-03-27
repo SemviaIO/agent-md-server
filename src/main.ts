@@ -1,9 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { serve } from "@hono/node-server";
-import { getConnInfo } from "@hono/node-server/conninfo";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 import { loadConfig } from "./config.js";
 import { createMcpServer, MUTATING_TOOLS } from "./mcp.js";
@@ -17,49 +15,65 @@ async function main() {
   const config = await loadConfig();
   const app = createApp(config);
 
-  // Mount MCP over HTTP at /mcp
-  const mcpServer = createMcpServer(config);
-  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  await mcpServer.connect(transport);
+  // MCP endpoint — stateless: new server + transport per request
+  app.post("/mcp", async (request, reply) => {
+    const remoteAddr = request.ip;
+    const body = request.body as Record<string, unknown>;
 
-  app.all("/mcp", async (c) => {
-    // Block mutating MCP tool calls from non-localhost (e.g. Tailscale)
-    const connInfo = getConnInfo(c);
-    const remoteAddr = connInfo.remote.address ?? "";
-    const isLocal = LOCALHOST_ADDRS.has(remoteAddr);
-
-    if (!isLocal && c.req.method === "POST") {
-      // Parse the JSON-RPC body to check the tool name
-      const body = await c.req.json();
-      if (
-        body?.method === "tools/call" &&
-        MUTATING_TOOLS.has(body?.params?.name)
-      ) {
-        return c.json(
-          {
-            jsonrpc: "2.0",
-            id: body.id,
-            error: {
-              code: -32600,
-              message: `Tool "${body.params.name}" is only available from localhost`,
-            },
-          },
-          403,
-        );
-      }
-      // Re-create the request with the consumed body for the transport
-      const newReq = new Request(c.req.raw.url, {
-        method: c.req.raw.method,
-        headers: c.req.raw.headers,
-        body: JSON.stringify(body),
-      });
-      return transport.handleRequest(newReq);
+    // Block mutating tool calls from non-localhost
+    if (
+      !LOCALHOST_ADDRS.has(remoteAddr) &&
+      body?.method === "tools/call" &&
+      MUTATING_TOOLS.has((body?.params as Record<string, unknown>)?.name as string)
+    ) {
+      void reply.code(403);
+      return {
+        jsonrpc: "2.0",
+        id: body.id,
+        error: {
+          code: -32600,
+          message: `Tool "${(body.params as Record<string, unknown>).name}" is only available from localhost`,
+        },
+      };
     }
 
-    return transport.handleRequest(c.req.raw);
+    const server = createMcpServer(config);
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+    await server.connect(transport);
+
+    await transport.handleRequest(request.raw, reply.raw, body);
+
+    request.raw.on("close", () => {
+      void transport.close();
+      void server.close();
+    });
+
+    // Tell Fastify we're managing the response
+    void reply.hijack();
   });
 
-  serve({ fetch: app.fetch, port: config.port, hostname: config.host });
+  // GET and DELETE on /mcp — method not allowed (stateless mode)
+  app.get("/mcp", async (_request, reply) => {
+    void reply.code(405);
+    return {
+      jsonrpc: "2.0",
+      error: { code: -32000, message: "Method not allowed." },
+      id: null,
+    };
+  });
+
+  app.delete("/mcp", async (_request, reply) => {
+    void reply.code(405);
+    return {
+      jsonrpc: "2.0",
+      error: { code: -32000, message: "Method not allowed." },
+      id: null,
+    };
+  });
+
+  await app.listen({ port: config.port, host: config.host });
 
   console.log(
     `agent-md-server running at http://${config.host}:${config.port}/`,
@@ -82,7 +96,6 @@ async function setupTailscale(port: number) {
   try {
     await execFileAsync("tailscale", ["serve", "--bg", localUrl]);
 
-    // Fetch the Tailscale hostname to print a clickable URL
     try {
       const { stdout: statusJson } = await execFileAsync("tailscale", [
         "status",

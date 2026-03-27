@@ -1,17 +1,20 @@
-import { Hono } from "hono";
+import type { FastifyInstance } from "fastify";
 
 import { listFiles } from "../fs.js";
 import type { SourceConfig } from "../types.js";
 
-export function createListingRoutes(sources: SourceConfig[]) {
-  const app = new Hono();
-
-  app.get("/api/:source/", async (c) => {
-    const sourceName = c.req.param("source");
+export function registerListingRoutes(
+  app: FastifyInstance,
+  sources: SourceConfig[],
+): void {
+  app.get("/api/:source/", async (request, reply) => {
+    const { source: sourceName } = request.params as { source: string };
     const source = sources.find((s) => s.name === sourceName);
 
     if (!source) {
-      return c.json({ error: `Source "${sourceName}" not found` }, 404);
+      return reply
+        .status(404)
+        .send({ error: `Source "${sourceName}" not found` });
     }
 
     const files = await listFiles(source.directory);
@@ -20,8 +23,6 @@ export function createListingRoutes(sources: SourceConfig[]) {
       path: `/${source.name}/${entry.name}`,
     }));
 
-    return c.json(mapped);
+    return reply.send(mapped);
   });
-
-  return app;
 }

@@ -1,72 +1,76 @@
 import { randomBytes } from "node:crypto";
 
-import { Hono } from "hono";
+import Fastify, { type FastifyInstance } from "fastify";
 
 import type { Config } from "./types.js";
-import { createListingRoutes } from "./routes/listing.js";
-import { createFileRoutes } from "./routes/file.js";
-import { createWatchRoutes } from "./routes/watch.js";
+import { registerListingRoutes } from "./routes/listing.js";
+import { registerFileRoutes } from "./routes/file.js";
+import { registerWatchRoutes } from "./routes/watch.js";
 import { renderShell } from "./templates/shell.js";
 import { renderListingPage } from "./templates/listing-page.js";
 
-type Variables = { nonce: string };
+declare module "fastify" {
+  interface FastifyRequest {
+    nonce: string;
+  }
+}
 
-export function createApp(config: Config) {
-  const app = new Hono<{ Variables: Variables }>();
+export function createApp(config: Config): FastifyInstance {
+  const app = Fastify();
 
   const sourceNames = config.sources.map((s) => s.name);
   const sourceSet = new Set(sourceNames);
 
-  // CSP middleware -- generate a per-request nonce and set the header
-  app.use("*", async (c, next) => {
-    const nonce = randomBytes(16).toString("base64");
-    c.set("nonce", nonce);
+  app.decorateRequest("nonce", "");
 
-    await next();
+  // CSP hook — generate a per-request nonce and set the header
+  app.addHook("onRequest", async (request, reply) => {
+    request.nonce = randomBytes(16).toString("base64");
 
     // Mermaid renders SVG with dynamic inline styles that cannot use nonces,
     // so 'unsafe-inline' is required for style-src.
-    c.header(
+    void reply.header(
       "Content-Security-Policy",
-      `default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net`,
+      `default-src 'none'; script-src 'nonce-${request.nonce}' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net`,
     );
   });
 
-  // Mount API/event route sub-apps
-  app.route("/", createListingRoutes(config.sources));
-  app.route("/", createFileRoutes(config.sources));
-  app.route("/", createWatchRoutes(config.sources));
+  // API and SSE routes
+  registerListingRoutes(app, config.sources);
+  registerFileRoutes(app, config.sources);
+  registerWatchRoutes(app, config.sources);
 
   // HTML page routes
-  app.get("/", (c) => {
-    const nonce = c.get("nonce");
-    return c.html(renderListingPage("agent-md-server", nonce, sourceNames));
+  app.get("/", async (request, reply) => {
+    void reply.type("text/html");
+    return renderListingPage("agent-md-server", request.nonce, sourceNames);
   });
 
-  app.get("/:source/", (c) => {
-    const sourceName = c.req.param("source");
-    if (!sourceSet.has(sourceName)) {
-      return c.notFound();
+  app.get<{ Params: { source: string } }>("/:source/", async (request, reply) => {
+    const { source } = request.params;
+    if (!sourceSet.has(source)) {
+      void reply.code(404);
+      return "Not Found";
     }
-    const nonce = c.get("nonce");
-    return c.html(renderListingPage(sourceName, nonce));
+    void reply.type("text/html");
+    return renderListingPage(source, request.nonce);
   });
 
   // Clean URLs: /plans/foo renders the view, /api/plans/foo.md serves raw markdown
-  app.get("/:source/:file", (c) => {
-    const sourceName = c.req.param("source");
-    const fileName = c.req.param("file");
+  app.get<{ Params: { source: string; file: string } }>("/:source/:file", async (request, reply) => {
+    const { source, file } = request.params;
 
-    if (!sourceSet.has(sourceName)) {
-      return c.notFound();
+    if (!sourceSet.has(source)) {
+      void reply.code(404);
+      return "Not Found";
     }
-    // Reject .md extension in the view URL — that's what /api/ is for
-    if (fileName.endsWith(".md")) {
-      return c.redirect(`/${sourceName}/${fileName.slice(0, -3)}`);
+    if (file.endsWith(".md")) {
+      void reply.redirect(`/${source}/${file.slice(0, -3)}`);
+      return;
     }
 
-    const nonce = c.get("nonce");
-    return c.html(renderShell(fileName, nonce));
+    void reply.type("text/html");
+    return renderShell(file, request.nonce);
   });
 
   return app;
