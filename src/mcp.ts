@@ -83,19 +83,23 @@ export function createMcpServer(config: Config): Server {
     { capabilities: { tools: {} } },
   );
 
+  const sourceNames = config.sources.map((s) => s.name).join(", ");
+  const sourceEnum = config.sources.map((s) => s.name);
+  const baseUrl = `http://${config.host}:${config.port}`;
+
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
         name: "write_document",
         description:
-          "Write a markdown document to a source directory. Validates mermaid blocks and returns the viewer URL. Only available from localhost.",
+          `Write a markdown document to a source directory. Validates mermaid blocks and returns the viewer URL. Available sources: ${sourceNames}. Viewer: ${baseUrl}`,
         inputSchema: {
           type: "object" as const,
           properties: {
             source: {
               type: "string",
-              description:
-                "Source name (call get_server_info to see available sources)",
+              description: `Source directory name`,
+              enum: sourceEnum,
             },
             filename: {
               type: "string",
@@ -119,13 +123,14 @@ export function createMcpServer(config: Config): Server {
       {
         name: "edit_document",
         description:
-          "Edit an existing markdown document with one or more text replacements. Validates mermaid blocks after edit. Follows the MCP filesystem edit_file convention. Only available from localhost.",
+          `Edit an existing markdown document with one or more text replacements. Validates mermaid blocks after edit. Available sources: ${sourceNames}. Viewer: ${baseUrl}`,
         inputSchema: {
           type: "object" as const,
           properties: {
             source: {
               type: "string",
-              description: "Which configured source the file is in",
+              description: "Source directory name",
+              enum: sourceEnum,
             },
             filename: {
               type: "string",
@@ -166,13 +171,14 @@ export function createMcpServer(config: Config): Server {
       },
       {
         name: "read_document",
-        description: "Read the raw markdown content of a document.",
+        description: `Read the raw markdown content of a document. Available sources: ${sourceNames}.`,
         inputSchema: {
           type: "object" as const,
           properties: {
             source: {
               type: "string",
-              description: "Which configured source to read from",
+              description: "Source directory name",
+              enum: sourceEnum,
             },
             filename: {
               type: "string",
@@ -188,29 +194,17 @@ export function createMcpServer(config: Config): Server {
       },
       {
         name: "list_documents",
-        description: "List all markdown documents in a source directory.",
+        description: `List all markdown documents in a source directory. Available sources: ${sourceNames}.`,
         inputSchema: {
           type: "object" as const,
           properties: {
             source: {
               type: "string",
-              description: "Which configured source to list",
+              description: "Source directory name",
+              enum: sourceEnum,
             },
           },
           required: ["source"],
-        },
-        annotations: {
-          readOnlyHint: true,
-          openWorldHint: false,
-        },
-      },
-      {
-        name: "get_server_info",
-        description:
-          "Get the server URL and list of configured source directories. Call this first to discover available sources.",
-        inputSchema: {
-          type: "object" as const,
-          properties: {},
         },
         annotations: {
           readOnlyHint: true,
@@ -473,20 +467,6 @@ export function createMcpServer(config: Config): Server {
             isError: true,
           };
         }
-      }
-
-      case "get_server_info": {
-        const sourceList = config.sources
-          .map((s) => `  ${s.name} → ${s.directory}`)
-          .join("\n");
-        return {
-          content: [
-            {
-              type: "text",
-              text: `URL: http://${config.host}:${config.port}/\n\nConfigured sources:\n${sourceList}`,
-            },
-          ],
-        };
       }
 
       default:
