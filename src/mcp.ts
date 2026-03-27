@@ -4,15 +4,18 @@ import path from "node:path";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import mermaid from "mermaid";
 
 import type { Config, SourceConfig } from "./types.js";
 import { listFiles, readMarkdown, resolveSafePath } from "./fs.js";
 
-// Initialize mermaid for server-side syntax validation only
-mermaid.initialize({ startOnLoad: false });
+// Initialize mermaid for server-side syntax validation only.
+// Disable DOMPurify — it requires browser APIs and we only need parse(), not render().
+mermaid.initialize({ startOnLoad: false, suppressErrorRendering: true, secure: [] });
 
 interface MermaidError {
   block: number;
@@ -36,6 +39,10 @@ async function validateMermaidBlocks(
     } catch (e: unknown) {
       const message =
         e instanceof Error ? e.message : String(e);
+      // Ignore environment errors (DOMPurify, DOM APIs) — not syntax errors
+      if (message.includes("DOMPurify") || message.includes("is not a function") || message.includes("is not defined")) {
+        continue;
+      }
       errors.push({ block: blockIndex, message });
     }
   }
@@ -80,26 +87,82 @@ export const MUTATING_TOOLS = new Set(["write_document", "edit_document"]);
 export function createMcpServer(config: Config): Server {
   const server = new Server(
     { name: "agent-md-server", version: "0.1.0" },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: {}, resources: {} } },
   );
 
   const sourceList = config.sources.map((s) => `${s.name} (${s.directory})`).join(", ");
-  const sourceEnum = config.sources.map((s) => s.name);
+  const writableSources = config.sources.filter((s) => s.name !== "plans");
+  const writeEnum = writableSources.map((s) => s.name);
+  const readEnum = config.sources.map((s) => s.name);
   const baseUrl = `http://${config.host}:${config.port}`;
+  const viewerUrl = config.tailscaleUrl ?? baseUrl;
+
+  // Resources — loaded into agent context automatically
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: [
+      {
+        uri: "agent-md-server://config",
+        name: "Markdown Viewer Configuration",
+        description: "Server URL, configured sources, and usage instructions for the markdown/mermaid diagram viewer",
+        mimeType: "text/plain",
+      },
+    ],
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    if (request.params.uri === "agent-md-server://config") {
+      const sourceDesc = config.sources
+        .map((s) => {
+          const writable = s.name !== "plans";
+          return `  ${s.name} → ${s.directory}${writable ? "" : " (read-only, managed by Claude Code)"}`;
+        })
+        .join("\n");
+
+      const text = [
+        `Markdown & Mermaid Diagram Viewer`,
+        ``,
+        `Viewer URL: ${viewerUrl}`,
+        `Local URL: ${baseUrl}`,
+        ``,
+        `Configured sources:`,
+        sourceDesc,
+        ``,
+        `When you create or update a plan file, tell the user they can view it at:`,
+        `  ${viewerUrl}/plans/{plan-name}`,
+        `where {plan-name} is the filename without .md. The viewer renders Mermaid diagrams and live-reloads on file changes.`,
+        ``,
+        `For ad-hoc diagrams or documents outside of plans, use the write_document MCP tool to write to a writable source (e.g. "temp").`,
+      ].join("\n");
+
+      return {
+        contents: [
+          {
+            uri: "agent-md-server://config",
+            mimeType: "text/plain",
+            text,
+          },
+        ],
+      };
+    }
+
+    return {
+      contents: [],
+    };
+  });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
         name: "write_document",
         description:
-          `Write a markdown document to a source directory. Validates mermaid blocks and returns the viewer URL. Available sources: ${sourceList}. Viewer: ${baseUrl}`,
+          `Write a markdown document to a source directory. Validates mermaid blocks and returns the viewer URL. Writable sources: ${writableSources.map((s) => `${s.name} (${s.directory})`).join(", ")}. The "plans" source is read-only — Claude Code writes plan files there natively. Viewer: ${viewerUrl}`,
         inputSchema: {
           type: "object" as const,
           properties: {
             source: {
               type: "string",
-              description: `Source directory name`,
-              enum: sourceEnum,
+              description: "Writable source directory name",
+              enum: writeEnum,
             },
             filename: {
               type: "string",
@@ -123,14 +186,14 @@ export function createMcpServer(config: Config): Server {
       {
         name: "edit_document",
         description:
-          `Edit an existing markdown document with one or more text replacements. Validates mermaid blocks after edit. Available sources: ${sourceList}. Viewer: ${baseUrl}`,
+          `Edit an existing markdown document with one or more text replacements. Validates mermaid blocks after edit. Writable sources: ${writableSources.map((s) => `${s.name} (${s.directory})`).join(", ")}. Viewer: ${viewerUrl}`,
         inputSchema: {
           type: "object" as const,
           properties: {
             source: {
               type: "string",
-              description: "Source directory name",
-              enum: sourceEnum,
+              description: "Writable source directory name",
+              enum: writeEnum,
             },
             filename: {
               type: "string",
@@ -178,7 +241,7 @@ export function createMcpServer(config: Config): Server {
             source: {
               type: "string",
               description: "Source directory name",
-              enum: sourceEnum,
+              enum: readEnum,
             },
             filename: {
               type: "string",
@@ -201,7 +264,7 @@ export function createMcpServer(config: Config): Server {
             source: {
               type: "string",
               description: "Source directory name",
-              enum: sourceEnum,
+              enum: readEnum,
             },
           },
           required: ["source"],
@@ -274,7 +337,7 @@ export function createMcpServer(config: Config): Server {
         }
 
         const viewName = filename.endsWith(".md") ? filename.slice(0, -3) : filename;
-        const url = `http://${config.host}:${config.port}/${source}/${viewName}`;
+        const url = `${viewerUrl}/${source}/${viewName}`;
         const errors = await validateMermaidBlocks(content);
         const result = formatValidationResult(
           `Written to ${filename}. View at ${url}`,
@@ -375,7 +438,7 @@ export function createMcpServer(config: Config): Server {
         }
 
         const viewName = filename.endsWith(".md") ? filename.slice(0, -3) : filename;
-        const url = `http://${config.host}:${config.port}/${source}/${viewName}`;
+        const url = `${viewerUrl}/${source}/${viewName}`;
         const errors = await validateMermaidBlocks(content);
 
         if (dryRun) {

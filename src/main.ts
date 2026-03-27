@@ -86,11 +86,11 @@ async function main() {
   }
 
   if (config.tailscale) {
-    await setupTailscale(config.port);
+    config.tailscaleUrl = await setupTailscale(config.port);
   }
 }
 
-async function setupTailscale(port: number) {
+async function setupTailscale(port: number): Promise<string | undefined> {
   const localUrl = `http://localhost:${port}`;
 
   try {
@@ -104,7 +104,9 @@ async function setupTailscale(port: number) {
       const status = JSON.parse(statusJson) as { Self?: { DNSName?: string } };
       const dnsName = status.Self?.DNSName?.replace(/\.$/, "");
       if (dnsName) {
-        console.log(`Tailscale: https://${dnsName}/`);
+        const url = `https://${dnsName}/`;
+        console.log(`Tailscale: ${url}`);
+        return url;
       } else {
         console.log("Tailscale serve enabled");
       }
@@ -116,7 +118,7 @@ async function setupTailscale(port: number) {
       console.warn(
         "Warning: tailscale command not found. Continuing without Tailscale.",
       );
-      return;
+      return undefined;
     }
     throw error;
   }
