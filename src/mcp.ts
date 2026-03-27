@@ -95,7 +95,7 @@ export function createMcpServer(config: Config): Server {
             source: {
               type: "string",
               description:
-                'Which configured source to write to (e.g. "temp", "plans")',
+                "Source name (call get_server_info to see available sources)",
             },
             filename: {
               type: "string",
@@ -205,8 +205,9 @@ export function createMcpServer(config: Config): Server {
         },
       },
       {
-        name: "get_server_url",
-        description: "Get the base URL of the markdown viewer server.",
+        name: "get_server_info",
+        description:
+          "Get the server URL and list of configured source directories. Call this first to discover available sources.",
         inputSchema: {
           type: "object" as const,
           properties: {},
@@ -474,12 +475,15 @@ export function createMcpServer(config: Config): Server {
         }
       }
 
-      case "get_server_url": {
+      case "get_server_info": {
+        const sourceList = config.sources
+          .map((s) => `  ${s.name} → ${s.directory}`)
+          .join("\n");
         return {
           content: [
             {
               type: "text",
-              text: `http://${config.host}:${config.port}/`,
+              text: `URL: http://${config.host}:${config.port}/\n\nConfigured sources:\n${sourceList}`,
             },
           ],
         };

@@ -95,7 +95,7 @@ claude mcp add --transport http --scope user agent-md-server http://127.0.0.1:33
 | `edit_document` | Edit a file with one or more `{ oldText, newText }` replacements. Supports `dryRun`. | Yes |
 | `read_document` | Read the raw markdown content of a file. | No |
 | `list_documents` | List all markdown files in a source directory. | No |
-| `get_server_url` | Get the base URL of the viewer server. | No |
+| `get_server_info` | Get the server URL and configured sources. Call first to discover available sources. | No |
 
 Mutating tools (`write_document`, `edit_document`) are blocked for non-localhost requests (e.g. via Tailscale).
 Read-only tools work from anywhere.
