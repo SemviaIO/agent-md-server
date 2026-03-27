@@ -1,0 +1,41 @@
+{
+  "name": "agent-md-server",
+  "version": "0.1.0",
+  "description": "A thin server for rendering Markdown with Mermaid diagrams from configurable directories",
+  "type": "module",
+  "main": "dist/main.js",
+  "bin": {
+    "agent-md-server": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/main.ts",
+    "start": "node dist/main.js",
+    "start:tailscale": "node dist/main.js --tailscale"
+  },
+  "keywords": [
+    "mermaid",
+    "markdown",
+    "server",
+    "claude",
+    "diagrams"
+  ],
+  "author": "SemviaIO",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.0",
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "hono": "^4.7.0",
+    "mermaid": "^11.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  },
+  "packageManager": "pnpm@10.32.1"
+}

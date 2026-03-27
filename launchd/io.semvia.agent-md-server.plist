@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template: copy to ~/Library/LaunchAgents/ and replace __HOME__ with your home directory.
+  Or run: sed "s|__HOME__|$HOME|g" launchd/io.semvia.agent-md-server.plist > ~/Library/LaunchAgents/io.semvia.agent-md-server.plist
+  Then: launchctl load ~/Library/LaunchAgents/io.semvia.agent-md-server.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.semvia.agent-md-server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.volta/bin/node</string>
+        <string>__HOME__/projects/SemviaIO/agent-md-server/dist/main.js</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/agent-md-server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/agent-md-server.log</string>
+    <key>WorkingDirectory</key>
+    <string>__HOME__/projects/SemviaIO/agent-md-server</string>
+</dict>
+</plist>
