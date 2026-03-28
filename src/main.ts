@@ -4,12 +4,10 @@ import { promisify } from "node:util";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 import { loadConfig } from "./config.js";
-import { createMcpServer, MUTATING_TOOLS } from "./mcp.js";
+import { createMcpServer } from "./mcp.js";
 import { createApp } from "./server.js";
 
 const execFileAsync = promisify(execFile);
-
-const LOCALHOST_ADDRS = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 async function main() {
   const config = await loadConfig();
@@ -17,25 +15,7 @@ async function main() {
 
   // MCP endpoint — stateless: new server + transport per request
   app.post("/mcp", async (request, reply) => {
-    const remoteAddr = request.ip;
     const body = request.body as Record<string, unknown>;
-
-    // Block mutating tool calls from non-localhost
-    if (
-      !LOCALHOST_ADDRS.has(remoteAddr) &&
-      body?.method === "tools/call" &&
-      MUTATING_TOOLS.has((body?.params as Record<string, unknown>)?.name as string)
-    ) {
-      void reply.code(403);
-      return {
-        jsonrpc: "2.0",
-        id: body.id,
-        error: {
-          code: -32600,
-          message: `Tool "${(body.params as Record<string, unknown>).name}" is only available from localhost`,
-        },
-      };
-    }
 
     const server = createMcpServer(config);
     const transport = new StreamableHTTPServerTransport({
