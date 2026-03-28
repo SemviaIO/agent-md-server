@@ -1,17 +1,15 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
-  ListResourcesRequestSchema,
   ListToolsRequestSchema,
-  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import mermaid from "mermaid";
 
 import type { Config, SourceConfig } from "./types.js";
-import { listFiles, readMarkdown, resolveSafePath } from "./fs.js";
+import { listFiles, resolveSafePath } from "./fs.js";
 
 // Initialize mermaid for server-side syntax validation only.
 // Disable DOMPurify — it requires browser APIs and we only need parse(), not render().
@@ -50,208 +48,68 @@ async function validateMermaidBlocks(
   return errors;
 }
 
-function formatValidationResult(
-  baseMessage: string,
-  errors: MermaidError[],
-): { text: string; isError: boolean } {
-  if (errors.length === 0) {
-    return { text: baseMessage, isError: false };
-  }
-  const errorList = errors
-    .map((e) => `  Block ${e.block}: ${e.message}`)
-    .join("\n");
-  return {
-    text: `${baseMessage}\n\nMermaid syntax errors found:\n${errorList}`,
-    isError: true,
-  };
-}
-
-function findSource(
+/**
+ * Reverse-map an absolute filesystem path to a configured source.
+ * Returns the matching source and the relative path within it, or undefined
+ * if the path doesn't fall within any source directory.
+ */
+function resolvePathToSource(
   sources: SourceConfig[],
-  name: string,
-): SourceConfig | undefined {
-  return sources.find((s) => s.name === name);
-}
-
-function validateFilename(filename: string) {
-  if (!filename.endsWith(".md")) {
-    throw new Error("Filename must end in .md");
+  absolutePath: string,
+): { source: SourceConfig; relative: string } | undefined {
+  const resolved = path.resolve(absolutePath);
+  for (const source of sources) {
+    const sourceDir = path.resolve(source.directory);
+    if (resolved.startsWith(sourceDir + path.sep)) {
+      const relative = path.relative(sourceDir, resolved);
+      if (relative.includes("..")) return undefined;
+      return { source, relative };
+    }
   }
-  if (filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
-    throw new Error("Filename must not contain path separators or '..'");
-  }
+  return undefined;
 }
-
-export const MUTATING_TOOLS = new Set(["write_document", "edit_document"]);
 
 export function createMcpServer(config: Config): Server {
   const server = new Server(
     { name: "agent-md-server", version: "0.1.0" },
-    { capabilities: { tools: {}, resources: {} } },
+    { capabilities: { tools: {} } },
   );
 
-  const sourceList = config.sources.map((s) => `${s.name} (${s.directory})`).join(", ");
-  const writableSources = config.sources.filter((s) => s.name !== "plans");
-  const writeEnum = writableSources.map((s) => s.name);
-  const readEnum = config.sources.map((s) => s.name);
   const baseUrl = `http://${config.host}:${config.port}`;
 
   function viewerUrl(): string {
     return (config.tailscaleUrl ?? baseUrl).replace(/\/+$/, "");
   }
 
-  // Resources — loaded into agent context automatically
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-    resources: [
-      {
-        uri: "agent-md-server://config",
-        name: "Markdown Viewer Configuration",
-        description: "Server URL, configured sources, and usage instructions for the markdown/mermaid diagram viewer",
-        mimeType: "text/plain",
-      },
-    ],
-  }));
+  function sourceListDescription(): string {
+    return config.sources.map((s) => s.directory).join(", ");
+  }
 
-  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-    if (request.params.uri === "agent-md-server://config") {
-      const sourceDesc = config.sources
-        .map((s) => {
-          const writable = s.name !== "plans";
-          return `  ${s.name} → ${s.directory}${writable ? "" : " (read-only, managed by Claude Code)"}`;
-        })
-        .join("\n");
-
-      const text = [
-        `Markdown & Mermaid Diagram Viewer`,
-        ``,
-        `Viewer URL: ${viewerUrl()}`,
-        `Local URL: ${baseUrl}`,
-        ``,
-        `Configured sources:`,
-        sourceDesc,
-        ``,
-        `When you create or update a plan file, tell the user they can view it at:`,
-        `  ${viewerUrl()}/plans/{plan-name}`,
-        `where {plan-name} is the filename without .md. The viewer renders Mermaid diagrams and live-reloads on file changes.`,
-        ``,
-        `For ad-hoc diagrams or documents outside of plans, use the write_document MCP tool to write to a writable source (e.g. "temp").`,
-      ].join("\n");
-
-      return {
-        contents: [
-          {
-            uri: "agent-md-server://config",
-            mimeType: "text/plain",
-            text,
-          },
-        ],
-      };
-    }
-
+  function pathNotInSourceError(): { content: { type: string; text: string }[]; isError: true } {
     return {
-      contents: [],
+      content: [{
+        type: "text",
+        text: `Path is not within any configured source directory. Configured directories: ${sourceListDescription()}`,
+      }],
+      isError: true,
     };
-  });
+  }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
-        name: "write_document",
+        name: "get_url_for_path",
         description:
-          `Write a markdown document to a source directory. Validates mermaid blocks and returns the viewer URL. Writable sources: ${writableSources.map((s) => `${s.name} (${s.directory})`).join(", ")}. The "plans" source is read-only — Claude Code writes plan files there natively. Viewer: ${viewerUrl()}`,
+          `Given an absolute filesystem path to a markdown file, returns the viewer URL where it renders with Mermaid diagrams and live-reload. Configured directories: ${sourceListDescription()}. Viewer: ${viewerUrl()}`,
         inputSchema: {
           type: "object" as const,
           properties: {
-            source: {
+            path: {
               type: "string",
-              description: "Writable source directory name",
-              enum: writeEnum,
-            },
-            filename: {
-              type: "string",
-              description: "Name of the file (must end in .md)",
-            },
-            content: {
-              type: "string",
-              description:
-                "Markdown content (can include mermaid code blocks)",
+              description: "Absolute filesystem path to a .md file",
             },
           },
-          required: ["source", "filename", "content"],
-        },
-        annotations: {
-          readOnlyHint: false,
-          destructiveHint: true,
-          idempotentHint: true,
-          openWorldHint: false,
-        },
-      },
-      {
-        name: "edit_document",
-        description:
-          `Edit an existing markdown document with one or more text replacements. Validates mermaid blocks after edit. Writable sources: ${writableSources.map((s) => `${s.name} (${s.directory})`).join(", ")}. Viewer: ${viewerUrl()}`,
-        inputSchema: {
-          type: "object" as const,
-          properties: {
-            source: {
-              type: "string",
-              description: "Writable source directory name",
-              enum: writeEnum,
-            },
-            filename: {
-              type: "string",
-              description: "Name of the file to edit",
-            },
-            edits: {
-              type: "array",
-              description: "List of edit operations to apply sequentially",
-              items: {
-                type: "object",
-                properties: {
-                  oldText: {
-                    type: "string",
-                    description: "The exact text to find",
-                  },
-                  newText: {
-                    type: "string",
-                    description: "The replacement text",
-                  },
-                },
-                required: ["oldText", "newText"],
-              },
-            },
-            dryRun: {
-              type: "boolean",
-              description:
-                "Preview the result and validate mermaid without writing. Default: false.",
-            },
-          },
-          required: ["source", "filename", "edits"],
-        },
-        annotations: {
-          readOnlyHint: false,
-          destructiveHint: true,
-          idempotentHint: false,
-          openWorldHint: false,
-        },
-      },
-      {
-        name: "read_document",
-        description: `Read the raw markdown content of a document. Available sources: ${sourceList}.`,
-        inputSchema: {
-          type: "object" as const,
-          properties: {
-            source: {
-              type: "string",
-              description: "Source directory name",
-              enum: readEnum,
-            },
-            filename: {
-              type: "string",
-              description: "Name of the file to read",
-            },
-          },
-          required: ["source", "filename"],
+          required: ["path"],
         },
         annotations: {
           readOnlyHint: true,
@@ -259,18 +117,31 @@ export function createMcpServer(config: Config): Server {
         },
       },
       {
-        name: "list_documents",
-        description: `List all markdown documents in a source directory. Available sources: ${sourceList}.`,
+        name: "validate_path",
+        description:
+          `Validates a markdown file at the given absolute filesystem path, checking for Mermaid diagram syntax errors. Configured directories: ${sourceListDescription()}`,
         inputSchema: {
           type: "object" as const,
           properties: {
-            source: {
+            path: {
               type: "string",
-              description: "Source directory name",
-              enum: readEnum,
+              description: "Absolute filesystem path to a .md file to validate",
             },
           },
-          required: ["source"],
+          required: ["path"],
+        },
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+        },
+      },
+      {
+        name: "list_paths",
+        description:
+          "Lists all markdown files currently hosted by the server, as absolute filesystem paths grouped by directory.",
+        inputSchema: {
+          type: "object" as const,
+          properties: {},
         },
         annotations: {
           readOnlyHint: true,
@@ -284,262 +155,94 @@ export function createMcpServer(config: Config): Server {
     const { name, arguments: args } = request.params;
 
     switch (name) {
-      case "write_document": {
-        const source = String(args?.source ?? "");
-        const filename = String(args?.filename ?? "");
-        const content = String(args?.content ?? "");
-
-        const sourceConfig = findSource(config.sources, source);
-        if (!sourceConfig) {
+      case "get_url_for_path": {
+        const filePath = String(args?.path ?? "");
+        if (!path.isAbsolute(filePath)) {
           return {
-            content: [
-              {
-                type: "text",
-                text: `Unknown source "${source}". Available: ${config.sources.map((s) => s.name).join(", ")}`,
-              },
-            ],
+            content: [{ type: "text", text: "Path must be absolute" }],
             isError: true,
           };
         }
 
-        try {
-          validateFilename(filename);
-        } catch (e) {
-          return {
-            content: [
-              { type: "text", text: (e as Error).message },
-            ],
-            isError: true,
-          };
-        }
+        const match = resolvePathToSource(config.sources, filePath);
+        if (!match) return pathNotInSourceError();
 
-        // Use resolveSafePath to verify the target is within the source directory
-        try {
-          const safePath = await resolveSafePath(
-            sourceConfig.directory,
-            filename,
-          );
-          await writeFile(safePath, content, "utf-8");
-        } catch {
-          // resolveSafePath throws on new files because realpath fails.
-          // Fall back to a manual resolve + prefix check for new files.
-          const resolvedRoot = path.resolve(sourceConfig.directory);
-          const joined = path.resolve(resolvedRoot, filename);
-          if (!joined.startsWith(resolvedRoot + path.sep)) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: "Path traversal attempt detected",
-                },
-              ],
-              isError: true,
-            };
-          }
-          await writeFile(joined, content, "utf-8");
-        }
-
-        const viewName = filename.endsWith(".md") ? filename.slice(0, -3) : filename;
-        const url = `${viewerUrl()}/${source}/${viewName}`;
-        const errors = await validateMermaidBlocks(content);
-        const result = formatValidationResult(
-          `Written to ${filename}. View at ${url}`,
-          errors,
-        );
+        const viewName = match.relative.endsWith(".md")
+          ? match.relative.slice(0, -3)
+          : match.relative;
+        const url = `${viewerUrl()}/${match.source.name}/${viewName}`;
         return {
-          content: [{ type: "text", text: result.text }],
-          isError: result.isError,
+          content: [{ type: "text", text: url }],
         };
       }
 
-      case "edit_document": {
-        const source = String(args?.source ?? "");
-        const filename = String(args?.filename ?? "");
-        const edits = args?.edits as
-          | { oldText: string; newText: string }[]
-          | undefined;
-        const dryRun = Boolean(args?.dryRun);
-
-        if (!edits || !Array.isArray(edits) || edits.length === 0) {
+      case "validate_path": {
+        const filePath = String(args?.path ?? "");
+        if (!path.isAbsolute(filePath)) {
           return {
-            content: [
-              { type: "text", text: "edits array is required and must not be empty" },
-            ],
+            content: [{ type: "text", text: "Path must be absolute" }],
             isError: true,
           };
         }
 
-        const sourceConfig = findSource(config.sources, source);
-        if (!sourceConfig) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Unknown source "${source}". Available: ${config.sources.map((s) => s.name).join(", ")}`,
-              },
-            ],
-            isError: true,
-          };
-        }
+        const match = resolvePathToSource(config.sources, filePath);
+        if (!match) return pathNotInSourceError();
 
-        // Resolve the file path safely
-        let filePath: string;
+        // Use resolveSafePath to prevent symlink escapes
+        let safePath: string;
         try {
-          filePath = await resolveSafePath(sourceConfig.directory, filename);
+          safePath = await resolveSafePath(match.source.directory, match.relative);
         } catch (e) {
           return {
-            content: [
-              { type: "text", text: (e as Error).message },
-            ],
+            content: [{ type: "text", text: (e as Error).message }],
             isError: true,
           };
         }
 
-        // Read current content
         let content: string;
         try {
-          content = await readFile(filePath, "utf-8");
+          content = await readFile(safePath, "utf-8");
         } catch {
           return {
-            content: [
-              {
-                type: "text",
-                text: `File "${filename}" not found in source "${source}"`,
-              },
-            ],
+            content: [{ type: "text", text: `File not found: ${filePath}` }],
             isError: true,
           };
         }
 
-        // Apply edits sequentially
-        for (let i = 0; i < edits.length; i++) {
-          const { oldText, newText } = edits[i];
-          const occurrences = content.split(oldText).length - 1;
-          if (occurrences === 0) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Edit ${i + 1}: oldText not found in "${filename}". Provide the exact text to replace.`,
-                },
-              ],
-              isError: true,
-            };
-          }
-          if (occurrences > 1) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Edit ${i + 1}: oldText found ${occurrences} times in "${filename}". Provide more context to make it unique.`,
-                },
-              ],
-              isError: true,
-            };
-          }
-          content = content.replace(oldText, newText);
-        }
-
-        const viewName = filename.endsWith(".md") ? filename.slice(0, -3) : filename;
-        const url = `${viewerUrl()}/${source}/${viewName}`;
         const errors = await validateMermaidBlocks(content);
-
-        if (dryRun) {
-          const result = formatValidationResult(
-            `Dry run: ${edits.length} edit(s) would be applied to ${filename}`,
-            errors,
-          );
+        if (errors.length === 0) {
           return {
-            content: [{ type: "text", text: result.text }],
-            isError: result.isError,
+            content: [{ type: "text", text: "Valid — no Mermaid syntax errors found." }],
           };
         }
 
-        await writeFile(filePath, content, "utf-8");
-        const result = formatValidationResult(
-          `Applied ${edits.length} edit(s) to ${filename}. View at ${url}`,
-          errors,
-        );
-        return {
-          content: [{ type: "text", text: result.text }],
-          isError: result.isError,
-        };
-      }
-
-      case "list_documents": {
-        const source = String(args?.source ?? "");
-        const sourceConfig = findSource(config.sources, source);
-        if (!sourceConfig) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Unknown source "${source}". Available: ${config.sources.map((s) => s.name).join(", ")}`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        const files = await listFiles(sourceConfig.directory);
-        if (files.length === 0) {
-          return {
-            content: [
-              { type: "text", text: `No documents in "${source}".` },
-            ],
-          };
-        }
-
-        const listing = files
-          .map((f) => `- ${f.name} (${f.size} bytes, modified ${f.modified})`)
+        const errorList = errors
+          .map((e) => `  Block ${e.block}: ${e.message}`)
           .join("\n");
         return {
-          content: [{ type: "text", text: listing }],
+          content: [{ type: "text", text: `Mermaid syntax errors found:\n${errorList}` }],
+          isError: true,
         };
       }
 
-      case "read_document": {
-        const source = String(args?.source ?? "");
-        const filename = String(args?.filename ?? "");
-        const sourceConfig = findSource(config.sources, source);
-        if (!sourceConfig) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Unknown source "${source}". Available: ${config.sources.map((s) => s.name).join(", ")}`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        try {
-          const content = await readMarkdown(
-            sourceConfig.directory,
-            filename,
+      case "list_paths": {
+        const sections: string[] = [];
+        for (const source of config.sources) {
+          const files = await listFiles(source.directory);
+          const dir = path.resolve(source.directory);
+          const paths = files.map((f) => path.join(dir, f.name));
+          sections.push(
+            `${dir}/\n${paths.length === 0 ? "  (empty)" : paths.map((p) => `  ${p}`).join("\n")}`,
           );
-          return {
-            content: [{ type: "text", text: content }],
-          };
-        } catch (e) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Failed to read "${filename}": ${(e as Error).message}`,
-              },
-            ],
-            isError: true,
-          };
         }
+        return {
+          content: [{ type: "text", text: sections.join("\n\n") }],
+        };
       }
 
       default:
         return {
-          content: [
-            { type: "text", text: `Unknown tool: ${name}` },
-          ],
+          content: [{ type: "text", text: `Unknown tool: ${name}` }],
           isError: true,
         };
     }
