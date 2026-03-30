@@ -119,7 +119,7 @@ export function createMcpServer(config: Config): Server {
       {
         name: "validate_path",
         description:
-          `Validates a markdown file at the given absolute filesystem path, checking for Mermaid diagram syntax errors. Configured directories: ${sourceListDescription()}`,
+          `Validates a markdown file at the given absolute filesystem path, checking for Mermaid diagram syntax errors. Returns the viewer URL on success. Configured directories: ${sourceListDescription()}. Viewer: ${viewerUrl()}`,
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -211,8 +211,12 @@ export function createMcpServer(config: Config): Server {
 
         const errors = await validateMermaidBlocks(content);
         if (errors.length === 0) {
+          const viewName = match.relative.endsWith(".md")
+            ? match.relative.slice(0, -3)
+            : match.relative;
+          const url = `${viewerUrl()}/${match.source.name}/${viewName}`;
           return {
-            content: [{ type: "text", text: "Valid — no Mermaid syntax errors found." }],
+            content: [{ type: "text", text: `Valid — no Mermaid syntax errors found.\n\nViewer URL: ${url}` }],
           };
         }
 
