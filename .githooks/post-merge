@@ -1,0 +1,16 @@
+#!/bin/bash
+# Rebuild and restart agent-md-server after pulling changes on main.
+# Only runs when on the main branch.
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$BRANCH" != "main" ]; then
+  exit 0
+fi
+
+echo "post-merge: rebuilding agent-md-server..."
+npm run build 2>&1
+
+echo "post-merge: restarting launchd service..."
+launchctl kickstart -k "gui/$(id -u)/io.semvia.agent-md-server" 2>&1
+
+echo "post-merge: done."

@@ -16,8 +16,7 @@ A thin server for helping you and your agent of choice communicate with rendered
 ## Quick start
 
 ```bash
-pnpm install
-pnpm build
+bash scripts/setup.sh   # install, build, configure git hooks
 node dist/main.js
 ```
 
@@ -135,6 +134,16 @@ pnpm build  # Build for production
 ```
 
 Requires Node.js >= 22.
+
+### Git hooks
+
+The repo uses checked-in git hooks in `.githooks/`. The setup script configures this automatically, but you can also run it manually:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+**`post-merge`** — When you pull changes on the `main` branch, automatically rebuilds and restarts the launchd service (`io.semvia.agent-md-server`).
 
 ## License
 
