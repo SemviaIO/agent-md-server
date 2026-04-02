@@ -65,11 +65,11 @@ async function main() {
     console.log(`  ${source.name} → ${source.directory}`);
   }
 
-  if (config.tailscale && !config.tailscaleUrl) {
+  if (config.tailscale) {
     config.tailscaleUrl = await setupTailscale(config.port);
-  }
-  if (config.tailscaleUrl) {
-    console.log(`Tailscale: ${config.tailscaleUrl}`);
+    if (config.tailscaleUrl) {
+      console.log(`Tailscale: ${config.tailscaleUrl}`);
+    }
   }
 }
 
@@ -89,9 +89,7 @@ async function setupTailscale(port: number): Promise<string | undefined> {
     const status = JSON.parse(stdout) as { Self?: { DNSName?: string } };
     const dnsName = status.Self?.DNSName?.replace(/\.$/, "");
     if (dnsName) {
-      const url = `https://${dnsName}/`;
-      console.log(`Tailscale: ${url}`);
-      return url;
+      return `https://${dnsName}/`;
     }
   } catch (error: unknown) {
     if (isCommandNotFound(error)) {
