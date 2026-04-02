@@ -28,7 +28,6 @@ interface RawConfig {
   port?: number;
   host?: string;
   tailscale?: boolean;
-  tailscaleUrl?: string;
 }
 
 function resolveTilde(filePath: string) {
@@ -106,6 +105,5 @@ export async function loadConfig(): Promise<Config> {
     port: args.port ?? raw?.port ?? DEFAULT_PORT,
     host: args.host ?? raw?.host ?? DEFAULT_HOST,
     tailscale: args.tailscale ?? raw?.tailscale ?? DEFAULT_TAILSCALE,
-    tailscaleUrl: raw?.tailscaleUrl,
   };
 }

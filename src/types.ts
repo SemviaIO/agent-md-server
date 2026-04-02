@@ -15,6 +15,6 @@ export interface Config {
   port: number;
   host: string;
   tailscale: boolean;
-  /** Explicit Tailscale URL override. Set by config file or resolved at runtime. */
+  /** Resolved at runtime from `tailscale status --json` when tailscale is enabled. */
   tailscaleUrl?: string;
 }
