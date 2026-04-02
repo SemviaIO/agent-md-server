@@ -97,7 +97,7 @@ async function setupTailscale(port: number): Promise<string | undefined> {
         "Warning: tailscale command not found. Continuing without Tailscale.",
       );
     } else {
-      console.warn("Warning: Tailscale setup failed:", (error as Error).message);
+      console.warn("Warning: Tailscale setup failed:", String(error));
     }
   }
   return undefined;
