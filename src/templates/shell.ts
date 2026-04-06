@@ -139,11 +139,30 @@ export function renderShell(title: string, nonce: string): string {
           ADD_ATTR: ['class'],
         });
         contentEl.innerHTML = clean;
-        // Re-run mermaid on freshly inserted elements
-        await mermaid.run({ querySelector: '.mermaid' });
+
+        // Render mermaid diagrams and collect errors
+        const errors = [];
+        const mermaidEls = contentEl.querySelectorAll('.mermaid');
+        for (const el of mermaidEls) {
+          try {
+            await mermaid.run({ nodes: [el] });
+          } catch (err) {
+            errors.push(String(err.message || err));
+          }
+        }
+
+        if (errors.length > 0) {
+          contentEl.setAttribute('data-render-status', 'error');
+          contentEl.setAttribute('data-render-errors', JSON.stringify(errors));
+        } else {
+          contentEl.setAttribute('data-render-status', 'ok');
+          contentEl.removeAttribute('data-render-errors');
+        }
       } catch (err) {
         contentEl.innerHTML = '<p style="color:#f85149;">Error loading content: '
           + escapeForHtml(String(err.message)) + '</p>';
+        contentEl.setAttribute('data-render-status', 'error');
+        contentEl.setAttribute('data-render-errors', JSON.stringify([String(err.message)]));
       }
     }
 
