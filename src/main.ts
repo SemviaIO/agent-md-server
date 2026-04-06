@@ -1,13 +1,11 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import dns from "node:dns";
+import os from "node:os";
 
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 import { loadConfig } from "./config.js";
 import { createMcpServer } from "./mcp.js";
 import { createApp } from "./server.js";
-
-const execFileAsync = promisify(execFile);
 
 async function main() {
   const config = await loadConfig();
@@ -66,47 +64,53 @@ async function main() {
   }
 
   if (config.tailscale) {
-    config.tailscaleUrl = await setupTailscale(config.port);
+    config.tailscaleUrl = await setupTailscale();
     if (config.tailscaleUrl) {
       console.log(`Tailscale: ${config.tailscaleUrl}`);
     }
   }
 }
 
-async function setupTailscale(port: number): Promise<string | undefined> {
+async function setupTailscale(): Promise<string | undefined> {
   try {
-    // Try to register the serve proxy (works from interactive shells,
-    // may fail under launchd due to GUI IPC restrictions)
-    try {
-      await execFileAsync("tailscale", ["serve", "--bg", `http://localhost:${port}`]);
-    } catch {
-      // If serve --bg fails (common under launchd), that's OK —
-      // the user can run it once manually. We just need the hostname.
+    // Find the Tailscale IP from network interfaces (CGNAT range 100.64.0.0/10)
+    const tailscaleIp = findTailscaleIp();
+    if (!tailscaleIp) {
+      console.warn("Warning: No Tailscale interface found. Continuing without Tailscale.");
+      return undefined;
     }
 
-    // Get the Tailscale hostname to construct the viewer URL
-    const { stdout } = await execFileAsync("tailscale", ["status", "--json"]);
-    const status = JSON.parse(stdout) as { Self?: { DNSName?: string } };
-    const dnsName = status.Self?.DNSName?.replace(/\.$/, "");
+    // Reverse DNS lookup via Tailscale's MagicDNS to get the hostname.
+    // This avoids the `tailscale` CLI which requires GUI/XPC and fails under launchd.
+    const resolver = new dns.promises.Resolver();
+    resolver.setServers(["100.100.100.100"]);
+    const hostnames = await resolver.reverse(tailscaleIp);
+    const dnsName = hostnames[0]?.replace(/\.$/, "");
     if (dnsName) {
       return `https://${dnsName}/`;
     }
   } catch (error: unknown) {
-    if (isCommandNotFound(error)) {
-      console.warn(
-        "Warning: tailscale command not found. Continuing without Tailscale.",
-      );
-    } else {
-      console.warn("Warning: Tailscale setup failed:", String(error));
+    console.warn("Warning: Tailscale setup failed:", String(error));
+  }
+  return undefined;
+}
+
+function findTailscaleIp(): string | undefined {
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const addr of addrs ?? []) {
+      if (addr.family === "IPv4" && isCGNAT(addr.address)) {
+        return addr.address;
+      }
     }
   }
   return undefined;
 }
 
-function isCommandNotFound(error: unknown) {
-  return (
-    error instanceof Error && "code" in error && error.code === "ENOENT"
-  );
+/** Tailscale uses the CGNAT range 100.64.0.0/10 (100.64.0.0 – 100.127.255.255). */
+function isCGNAT(ip: string): boolean {
+  const first = Number(ip.split(".")[0]);
+  const second = Number(ip.split(".")[1]);
+  return first === 100 && second >= 64 && second <= 127;
 }
 
 main().catch((error: unknown) => {
