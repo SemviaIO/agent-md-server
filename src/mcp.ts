@@ -98,34 +98,15 @@ export function createMcpServer(config: Config): Server {
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
-        name: "get_url_for_path",
+        name: "get_url",
         description:
-          `Given an absolute filesystem path to a markdown file, returns the viewer URL where it renders with Mermaid diagrams and live-reload. Configured directories: ${sourceListDescription()}. Viewer: ${viewerUrl()}`,
+          `Validates a markdown file's Mermaid diagrams and returns its viewer URL. Returns an error with details if validation fails — fix the file and call again to get the URL. Configured directories: ${sourceListDescription()}. Viewer: ${viewerUrl()}`,
         inputSchema: {
           type: "object" as const,
           properties: {
             path: {
               type: "string",
               description: "Absolute filesystem path to a .md file",
-            },
-          },
-          required: ["path"],
-        },
-        annotations: {
-          readOnlyHint: true,
-          openWorldHint: false,
-        },
-      },
-      {
-        name: "validate_path",
-        description:
-          `Validates a markdown file at the given absolute filesystem path, checking for Mermaid diagram syntax errors. Returns the viewer URL on success. Configured directories: ${sourceListDescription()}. Viewer: ${viewerUrl()}`,
-        inputSchema: {
-          type: "object" as const,
-          properties: {
-            path: {
-              type: "string",
-              description: "Absolute filesystem path to a .md file to validate",
             },
           },
           required: ["path"],
@@ -155,28 +136,7 @@ export function createMcpServer(config: Config): Server {
     const { name, arguments: args } = request.params;
 
     switch (name) {
-      case "get_url_for_path": {
-        const filePath = String(args?.path ?? "");
-        if (!path.isAbsolute(filePath)) {
-          return {
-            content: [{ type: "text", text: "Path must be absolute" }],
-            isError: true,
-          };
-        }
-
-        const match = resolvePathToSource(config.sources, filePath);
-        if (!match) return pathNotInSourceError();
-
-        const viewName = match.relative.endsWith(".md")
-          ? match.relative.slice(0, -3)
-          : match.relative;
-        const url = `${viewerUrl()}/${match.source.name}/${viewName}`;
-        return {
-          content: [{ type: "text", text: url }],
-        };
-      }
-
-      case "validate_path": {
+      case "get_url": {
         const filePath = String(args?.path ?? "");
         if (!path.isAbsolute(filePath)) {
           return {
@@ -210,22 +170,22 @@ export function createMcpServer(config: Config): Server {
         }
 
         const errors = await validateMermaidBlocks(content);
-        if (errors.length === 0) {
-          const viewName = match.relative.endsWith(".md")
-            ? match.relative.slice(0, -3)
-            : match.relative;
-          const url = `${viewerUrl()}/${match.source.name}/${viewName}`;
+        if (errors.length > 0) {
+          const errorList = errors
+            .map((e) => `  Block ${e.block}: ${e.message}`)
+            .join("\n");
           return {
-            content: [{ type: "text", text: `Valid — no Mermaid syntax errors found.\n\nViewer URL: ${url}` }],
+            content: [{ type: "text", text: `Mermaid syntax errors — fix and call get_url again:\n${errorList}` }],
+            isError: true,
           };
         }
 
-        const errorList = errors
-          .map((e) => `  Block ${e.block}: ${e.message}`)
-          .join("\n");
+        const viewName = match.relative.endsWith(".md")
+          ? match.relative.slice(0, -3)
+          : match.relative;
+        const url = `${viewerUrl()}/${match.source.name}/${viewName}`;
         return {
-          content: [{ type: "text", text: `Mermaid syntax errors found:\n${errorList}` }],
-          isError: true,
+          content: [{ type: "text", text: JSON.stringify({ status: "ok", url }) }],
         };
       }
 
