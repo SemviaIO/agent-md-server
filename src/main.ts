@@ -5,17 +5,26 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 
 import { loadConfig } from "./config.js";
 import { createMcpServer } from "./mcp.js";
+import { Renderer } from "./renderer.js";
 import { createApp } from "./server.js";
 
 async function main() {
   const config = await loadConfig();
   const app = createApp(config);
 
+  // Late-bound renderer — set after listen() so Playwright can reach the server.
+  let renderer: Renderer | undefined;
+
   // MCP endpoint — stateless: new server + transport per request
   app.post("/mcp", async (request, reply) => {
+    if (!renderer) {
+      void reply.code(503);
+      return { jsonrpc: "2.0", error: { code: -32000, message: "Server starting up" }, id: null };
+    }
+
     const body = request.body as Record<string, unknown>;
 
-    const server = createMcpServer(config);
+    const server = createMcpServer(config, renderer);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
@@ -69,6 +78,11 @@ async function main() {
       console.log(`Tailscale: ${config.tailscaleUrl}`);
     }
   }
+
+  // Renderer uses Playwright to visit the server's own viewer pages.
+  // Must use local URL (not Tailscale) since Playwright runs on the same machine.
+  renderer = new Renderer(`http://${config.host}:${config.port}`);
+  console.log("Playwright renderer ready");
 }
 
 async function setupTailscale(): Promise<string | undefined> {
