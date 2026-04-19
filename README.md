@@ -32,7 +32,7 @@ The config file lives at `~/.config/agent-md-server/config.json`.
 ```json
 {
   "sources": {
-    "plans": "~/.claude/plans",
+    "plans": "~/plans",
     "temp": "/tmp/agent-md-server"
   },
   "port": 3333,
@@ -57,7 +57,7 @@ Default sources when no config file is present:
 
 | Name | Path |
 |------|------|
-| `plans` | `~/.claude/plans` |
+| `plans` | `~/plans` |
 | `temp` | `/tmp/agent-md-server` |
 
 ## CLI flags

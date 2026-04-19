@@ -15,7 +15,7 @@ const CONFIG_PATH = node_path.join(
 );
 
 const DEFAULT_SOURCES: Record<string, string> = {
-  plans: "~/.claude/plans",
+  plans: "~/plans",
   temp: "/tmp/agent-md-server",
 };
 
