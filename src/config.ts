@@ -46,11 +46,36 @@ function validateSourceName(name: string) {
   }
 }
 
+function validateSourceSet(names: string[]) {
+  // Reject overlapping source names — one cannot be a path-prefix of another.
+  // e.g. "plans" + "plans/foo" would produce Fastify route collisions between
+  // "/plans/:file" (file under outer) and "/plans/foo/" (listing for inner).
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      const [a, b] = [names[i], names[j]];
+      if (
+        a === b ||
+        a.startsWith(b + "/") ||
+        b.startsWith(a + "/")
+      ) {
+        throw new Error(
+          `Overlapping source names "${a}" and "${b}": one cannot be a path-prefix of the other`,
+        );
+      }
+    }
+  }
+}
+
 function transformSources(sources: Record<string, string>): SourceConfig[] {
-  return Object.entries(sources).map(([name, directory]) => {
+  const entries = Object.entries(sources);
+  for (const [name] of entries) {
     validateSourceName(name);
-    return { name, directory: resolveTilde(directory) };
-  });
+  }
+  validateSourceSet(entries.map(([name]) => name));
+  return entries.map(([name, directory]) => ({
+    name,
+    directory: resolveTilde(directory),
+  }));
 }
 
 async function readConfigFile(): Promise<RawConfig | undefined> {
@@ -99,6 +124,11 @@ export async function loadConfig(): Promise<Config> {
   const args = parseArgs();
 
   const sources = transformSources(raw?.sources ?? DEFAULT_SOURCES);
+  if (sources.length === 0) {
+    console.warn(
+      "No sources configured; only the root index will be served.",
+    );
+  }
   await ensureDirectories(sources);
 
   return {
