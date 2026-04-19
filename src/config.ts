@@ -5,7 +5,7 @@ import node_util from "node:util";
 
 import type { Config, SourceConfig } from "./types.js";
 
-const VALID_SOURCE_NAME = /^[a-z0-9-]+$/;
+const VALID_SOURCE_NAME = /^[a-z0-9-]+(\/[a-z0-9-]+)*$/;
 
 const CONFIG_PATH = node_path.join(
   node_os.homedir(),
@@ -16,6 +16,7 @@ const CONFIG_PATH = node_path.join(
 
 const DEFAULT_SOURCES: Record<string, string> = {
   plans: "~/plans",
+  "claude/plans": "~/.claude/plans",
   temp: "/tmp/agent-md-server",
 };
 
@@ -40,7 +41,7 @@ function resolveTilde(filePath: string) {
 function validateSourceName(name: string) {
   if (!VALID_SOURCE_NAME.test(name)) {
     throw new Error(
-      `Invalid source name "${name}": must match /^[a-z0-9-]+$/`,
+      `Invalid source name "${name}": must be one or more [a-z0-9-] segments joined by "/" (e.g. "plans" or "claude/plans")`,
     );
   }
 }

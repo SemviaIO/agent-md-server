@@ -1,4 +1,8 @@
-export function renderShell(title: string, nonce: string): string {
+export function renderShell(
+  title: string,
+  nonce: string,
+  sourcePrefix: string,
+): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -72,7 +76,7 @@ export function renderShell(title: string, nonce: string): string {
 <body>
   <div class="status-banner" id="status"></div>
   <div class="container">
-    <a class="back-link" id="back-link" href="/">&larr; Back</a>
+    <a class="back-link" id="back-link" href="/${escapeHtml(sourcePrefix)}/">&larr; Back</a>
     <h1 class="page-title">${escapeHtml(title)}</h1>
     <div class="markdown-body" id="content">
       <p style="color:#8b949e;">Loading&hellip;</p>
@@ -112,15 +116,10 @@ export function renderShell(title: string, nonce: string): string {
     const statusEl = document.getElementById('status');
 
     // Derive API and SSE URLs: /plans/foo → /api/plans/foo.md
+    // (works for any source-prefix depth, e.g. /claude/plans/foo → /api/claude/plans/foo.md)
     const pagePath = window.location.pathname;
     const apiUrl = '/api' + pagePath + '.md';
     const sseUrl = '/events' + pagePath + '.md';
-
-    // Set back link to parent source listing
-    const parts = pagePath.split('/').filter(Boolean);
-    if (parts.length > 0) {
-      document.getElementById('back-link').href = '/' + parts[0] + '/';
-    }
 
     function showStatus(message) {
       statusEl.textContent = message;

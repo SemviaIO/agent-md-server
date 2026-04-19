@@ -33,6 +33,7 @@ The config file lives at `~/.config/agent-md-server/config.json`.
 {
   "sources": {
     "plans": "~/plans",
+    "claude/plans": "~/.claude/plans",
     "temp": "/tmp/agent-md-server"
   },
   "port": 3333,
@@ -47,9 +48,9 @@ Defaults are applied when the config file is missing or a field is omitted.
 ### Sources
 
 Sources are name-to-path mappings.
-Each source name becomes a URL prefix (`/plans/`, `/temp/`, etc.).
+Each source name becomes a URL prefix (`/plans/`, `/claude/plans/`, `/temp/`, etc.).
 
-- Names must match `[a-z0-9-]` (lowercase alphanumeric and hyphens).
+- Names are one or more `[a-z0-9-]` segments joined by `/`. Each segment becomes a URL path segment — e.g. `claude/plans` is served at `/claude/plans/`.
 - Paths support `~` expansion to the home directory.
 - Directories are created automatically if they do not exist.
 
@@ -58,6 +59,7 @@ Default sources when no config file is present:
 | Name | Path |
 |------|------|
 | `plans` | `~/plans` |
+| `claude/plans` | `~/.claude/plans` |
 | `temp` | `/tmp/agent-md-server` |
 
 ## CLI flags
@@ -121,6 +123,8 @@ If the `tailscale` command is not found, the server continues without it and pri
 /api/:source/foo.md       Raw markdown content
 /events/:source/foo.md    SSE stream (emits on file change)
 ```
+
+`:source` may itself be a multi-segment prefix (e.g. `claude/plans`), in which case the URLs include each segment — `/claude/plans/foo`, `/api/claude/plans/foo.md`, etc.
 
 The `/api/` endpoints return JSON (listings) or raw markdown (files).
 The `/events/` endpoint opens a persistent SSE connection that sends a `changed` event whenever the file is modified on disk.
