@@ -14,10 +14,18 @@ export function registerWatchRoutes(
       // Validate the file exists before setting up the watcher
       try {
         await readMarkdown(source.directory, filename);
-      } catch {
-        return reply
-          .status(404)
-          .send({ error: `File "${filename}" not found` });
+      } catch (error: unknown) {
+        if (error instanceof Error) {
+          if ("code" in error && error.code === "ENOENT") {
+            return reply
+              .status(404)
+              .send({ error: `File "${filename}" not found` });
+          }
+          if (error.message.includes("Path traversal")) {
+            return reply.status(403).send({ error: "Forbidden" });
+          }
+        }
+        return reply.status(500).send({ error: "Internal server error" });
       }
 
       reply.raw.writeHead(200, {
