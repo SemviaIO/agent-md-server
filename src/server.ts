@@ -19,7 +19,6 @@ export function createApp(config: Config): FastifyInstance {
   const app = Fastify();
 
   const sourceNames = config.sources.map((s) => s.name);
-  const sourceSet = new Set(sourceNames);
 
   app.decorateRequest("nonce", "");
 
@@ -40,38 +39,38 @@ export function createApp(config: Config): FastifyInstance {
   registerFileRoutes(app, config.sources);
   registerWatchRoutes(app, config.sources);
 
-  // HTML page routes
+  // Root index
   app.get("/", async (request, reply) => {
     void reply.type("text/html");
     return renderListingPage("agent-md-server", request.nonce, sourceNames);
   });
 
-  app.get<{ Params: { source: string } }>("/:source/", async (request, reply) => {
-    const { source } = request.params;
-    if (!sourceSet.has(source)) {
-      void reply.code(404);
-      return "Not Found";
-    }
-    void reply.type("text/html");
-    return renderListingPage(source, request.nonce);
-  });
+  // Per-source HTML routes. A source name may contain "/" (e.g. "claude/plans"),
+  // so we register explicit routes per source rather than using a /:source param,
+  // which would only match a single path segment.
+  for (const source of config.sources) {
+    const prefix = `/${source.name}`;
 
-  // Clean URLs: /plans/foo renders the view, /api/plans/foo.md serves raw markdown
-  app.get<{ Params: { source: string; file: string } }>("/:source/:file", async (request, reply) => {
-    const { source, file } = request.params;
+    app.get(`${prefix}/`, async (request, reply) => {
+      void reply.type("text/html");
+      return renderListingPage(source.name, request.nonce);
+    });
 
-    if (!sourceSet.has(source)) {
-      void reply.code(404);
-      return "Not Found";
-    }
-    if (file.endsWith(".md")) {
-      void reply.redirect(`/${source}/${file.slice(0, -3)}`);
-      return;
-    }
+    app.get<{ Params: { file: string } }>(
+      `${prefix}/:file`,
+      async (request, reply) => {
+        const { file } = request.params;
 
-    void reply.type("text/html");
-    return renderShell(file, request.nonce);
-  });
+        if (file.endsWith(".md")) {
+          void reply.redirect(`${prefix}/${file.slice(0, -3)}`);
+          return;
+        }
+
+        void reply.type("text/html");
+        return renderShell(file, request.nonce, source.name);
+      },
+    );
+  }
 
   return app;
 }

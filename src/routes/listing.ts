@@ -7,22 +7,15 @@ export function registerListingRoutes(
   app: FastifyInstance,
   sources: SourceConfig[],
 ): void {
-  app.get("/api/:source/", async (request, reply) => {
-    const { source: sourceName } = request.params as { source: string };
-    const source = sources.find((s) => s.name === sourceName);
+  for (const source of sources) {
+    app.get(`/api/${source.name}/`, async (_request, reply) => {
+      const files = await listFiles(source.directory);
+      const mapped = files.map((entry) => ({
+        ...entry,
+        path: `/${source.name}/${entry.name}`,
+      }));
 
-    if (!source) {
-      return reply
-        .status(404)
-        .send({ error: `Source "${sourceName}" not found` });
-    }
-
-    const files = await listFiles(source.directory);
-    const mapped = files.map((entry) => ({
-      ...entry,
-      path: `/${source.name}/${entry.name}`,
-    }));
-
-    return reply.send(mapped);
-  });
+      return reply.send(mapped);
+    });
+  }
 }
