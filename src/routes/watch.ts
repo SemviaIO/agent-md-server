@@ -8,12 +8,12 @@ export function registerWatchRoutes(
   sources: SourceConfig[],
 ): void {
   for (const source of sources) {
-    app.get(`/events/${source.name}/:file`, async (request, reply) => {
+    app.get(`/events/${source.prefix}/:file`, async (request, reply) => {
       const { file: filename } = request.params as { file: string };
 
       // Validate the file exists before setting up the watcher
       try {
-        await readMarkdown(source.directory, filename);
+        await readMarkdown(source.root, filename);
       } catch (error: unknown) {
         if (error instanceof Error) {
           if ("code" in error && error.code === "ENOENT") {
@@ -35,7 +35,7 @@ export function registerWatchRoutes(
       });
       reply.hijack();
 
-      const cleanup = watchFile(source.directory, filename, () => {
+      const cleanup = watchFile(source.root, filename, () => {
         reply.raw.write("data: changed\n\n");
       });
 

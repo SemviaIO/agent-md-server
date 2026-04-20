@@ -6,8 +6,17 @@ export interface FileEntry {
 }
 
 export interface SourceConfig {
-  name: string;
-  directory: string;
+  /** URL path prefix, e.g. "plans" or "claude/plans". */
+  prefix: string;
+  /** Filesystem directory. */
+  root: string;
+  /**
+   * When true, the source is served (routes register, `get_url` resolves) but
+   * is omitted from MCP tool descriptions, `list_paths`, and the browser root
+   * index. Use for fallback directories you want available by absolute-path
+   * lookup without advertising them.
+   */
+  hidden?: boolean;
 }
 
 export interface Config {

@@ -69,7 +69,8 @@ async function main() {
     `MCP endpoint: http://${config.host}:${config.port}/mcp`,
   );
   for (const source of config.sources) {
-    console.log(`  ${source.name} → ${source.directory}`);
+    const tag = source.hidden ? " (hidden)" : "";
+    console.log(`  ${source.prefix} → ${source.root}${tag}`);
   }
 
   if (config.tailscale) {

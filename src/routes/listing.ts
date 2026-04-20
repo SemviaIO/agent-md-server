@@ -8,11 +8,11 @@ export function registerListingRoutes(
   sources: SourceConfig[],
 ): void {
   for (const source of sources) {
-    app.get(`/api/${source.name}/`, async (_request, reply) => {
-      const files = await listFiles(source.directory);
+    app.get(`/api/${source.prefix}/`, async (_request, reply) => {
+      const files = await listFiles(source.root);
       const mapped = files.map((entry) => ({
         ...entry,
-        path: `/${source.name}/${entry.name}`,
+        path: `/${source.prefix}/${entry.name}`,
       }));
 
       return reply.send(mapped);

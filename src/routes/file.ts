@@ -8,11 +8,11 @@ export function registerFileRoutes(
   sources: SourceConfig[],
 ): void {
   for (const source of sources) {
-    app.get(`/api/${source.name}/:file`, async (request, reply) => {
+    app.get(`/api/${source.prefix}/:file`, async (request, reply) => {
       const { file: filename } = request.params as { file: string };
 
       try {
-        const content = await readMarkdown(source.directory, filename);
+        const content = await readMarkdown(source.root, filename);
         return reply
           .header("Content-Type", "text/markdown; charset=utf-8")
           .send(content);

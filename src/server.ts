@@ -18,7 +18,10 @@ declare module "fastify" {
 export function createApp(config: Config): FastifyInstance {
   const app = Fastify();
 
-  const sourceNames = config.sources.map((s) => s.name);
+  // Hidden sources are served but not listed on the root index.
+  const visiblePrefixes = config.sources
+    .filter((s) => !s.hidden)
+    .map((s) => s.prefix);
 
   app.decorateRequest("nonce", "");
 
@@ -34,7 +37,8 @@ export function createApp(config: Config): FastifyInstance {
     );
   });
 
-  // API and SSE routes
+  // API and SSE routes (hidden sources still get routes — `hidden` only
+  // controls discovery, not reachability)
   registerListingRoutes(app, config.sources);
   registerFileRoutes(app, config.sources);
   registerWatchRoutes(app, config.sources);
@@ -42,32 +46,32 @@ export function createApp(config: Config): FastifyInstance {
   // Root index
   app.get("/", async (request, reply) => {
     void reply.type("text/html");
-    return renderListingPage("agent-md-server", request.nonce, sourceNames);
+    return renderListingPage("agent-md-server", request.nonce, visiblePrefixes);
   });
 
-  // Per-source HTML routes. A source name may contain "/" (e.g. "claude/plans"),
+  // Per-source HTML routes. A source prefix may contain "/" (e.g. "claude/plans"),
   // so we register explicit routes per source rather than using a /:source param,
   // which would only match a single path segment.
   for (const source of config.sources) {
-    const prefix = `/${source.name}`;
+    const urlPrefix = `/${source.prefix}`;
 
-    app.get(`${prefix}/`, async (request, reply) => {
+    app.get(`${urlPrefix}/`, async (request, reply) => {
       void reply.type("text/html");
-      return renderListingPage(source.name, request.nonce);
+      return renderListingPage(source.prefix, request.nonce);
     });
 
     app.get<{ Params: { file: string } }>(
-      `${prefix}/:file`,
+      `${urlPrefix}/:file`,
       async (request, reply) => {
         const { file } = request.params;
 
         if (file.endsWith(".md")) {
-          void reply.redirect(`${prefix}/${file.slice(0, -3)}`);
+          void reply.redirect(`${urlPrefix}/${file.slice(0, -3)}`);
           return;
         }
 
         void reply.type("text/html");
-        return renderShell(file, request.nonce, source.name);
+        return renderShell(file, request.nonce, source.prefix);
       },
     );
   }
