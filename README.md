@@ -31,11 +31,11 @@ The config file lives at `~/.config/agent-md-server/config.json`.
 
 ```json
 {
-  "sources": {
-    "plans": "~/plans",
-    "claude/plans": "~/.claude/plans",
-    "temp": "/tmp/agent-md-server"
-  },
+  "sources": [
+    {"prefix": "plans", "root": "~/plans"},
+    {"prefix": "claude/plans", "root": "~/.claude/plans", "hidden": true},
+    {"prefix": "temp", "root": "/tmp/agent-md-server"}
+  ],
   "port": 3333,
   "host": "127.0.0.1",
   "tailscale": false
@@ -47,20 +47,23 @@ Defaults are applied when the config file is missing or a field is omitted.
 
 ### Sources
 
-Sources are name-to-path mappings.
-Each source name becomes a URL prefix (`/plans/`, `/claude/plans/`, `/temp/`, etc.).
+Each source is an object with a URL `prefix` and a filesystem `root`, matching `@fastify/static` conventions.
 
-- Names are one or more `[a-z0-9-]` segments joined by `/`. Each segment becomes a URL path segment — e.g. `claude/plans` is served at `/claude/plans/`.
-- Paths support `~` expansion to the home directory.
-- Directories are created automatically if they do not exist.
+- `prefix` — one or more `[a-z0-9-]` segments joined by `/`. Each segment becomes a URL path segment — e.g. `claude/plans` is served at `/claude/plans/`.
+- `root` — filesystem directory. Supports `~` expansion to the home directory. Created automatically if it does not exist.
+- `hidden` — optional boolean (default `false`). When `true`, the source is served normally but omitted from MCP tool descriptions, `list_paths`, and the browser root index. Use for fallback directories you want available by absolute-path lookup without advertising them.
+
+Two sources cannot have overlapping prefixes (e.g. `plans` and `plans/foo` would collide) — the server exits at boot with a clear error if this happens.
 
 Default sources when no config file is present:
 
-| Name | Path |
-|------|------|
-| `plans` | `~/plans` |
-| `claude/plans` | `~/.claude/plans` |
-| `temp` | `/tmp/agent-md-server` |
+| Prefix | Root | Hidden |
+|--------|------|:-:|
+| `plans` | `~/plans` | |
+| `claude/plans` | `~/.claude/plans` | ✓ |
+| `temp` | `/tmp/agent-md-server` | |
+
+> **Note:** In v0.1.0 the `sources` field changed from a `{name: path}` map to a list of `{prefix, root, hidden?}` objects. The old shape is rejected at boot with an error pointing to the new shape.
 
 ## CLI flags
 

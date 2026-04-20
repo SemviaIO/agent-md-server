@@ -13,7 +13,8 @@ import type { Renderer } from "./renderer.js";
 /**
  * Reverse-map an absolute filesystem path to a configured source.
  * Returns the matching source and the relative path within it, or undefined
- * if the path doesn't fall within any source directory.
+ * if the path doesn't fall within any source directory. Hidden sources are
+ * included — `hidden` only controls discovery surfaces, not resolution.
  */
 function resolvePathToSource(
   sources: SourceConfig[],
@@ -21,7 +22,7 @@ function resolvePathToSource(
 ): { source: SourceConfig; relative: string } | undefined {
   const resolved = path.resolve(absolutePath);
   for (const source of sources) {
-    const sourceDir = path.resolve(source.directory);
+    const sourceDir = path.resolve(source.root);
     if (resolved.startsWith(sourceDir + path.sep)) {
       const relative = path.relative(sourceDir, resolved);
       if (relative.includes("..")) return undefined;
@@ -43,8 +44,13 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
     return (config.tailscaleUrl ?? baseUrl).replace(/\/+$/, "");
   }
 
+  // Visible sources are surfaced in tool descriptions and `list_paths`.
+  // Hidden sources are excluded from these discovery surfaces but remain
+  // resolvable via `get_url` when given an absolute path under them.
+  const visibleSources = config.sources.filter((s) => !s.hidden);
+
   function sourceListDescription(): string {
-    return config.sources.map((s) => s.directory).join(", ");
+    return visibleSources.map((s) => s.root).join(", ");
   }
 
   function pathNotInSourceError(): { content: { type: string; text: string }[]; isError: true } {
@@ -112,7 +118,7 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
 
         // Validate the file exists and isn't a symlink escape
         try {
-          await resolveSafePath(match.source.directory, match.relative);
+          await resolveSafePath(match.source.root, match.relative);
         } catch (e) {
           return {
             content: [{ type: "text", text: (e as Error).message }],
@@ -125,8 +131,8 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
           : match.relative;
 
         // Render and validate via Playwright
-        const safePath = path.resolve(match.source.directory, match.relative);
-        const result = await renderer.render(match.source.name, viewName, safePath);
+        const safePath = path.resolve(match.source.root, match.relative);
+        const result = await renderer.render(match.source.prefix, viewName, safePath);
 
         if (result.status === "error") {
           const errorList = result.errors
@@ -138,7 +144,7 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
           };
         }
 
-        const url = `${viewerUrl()}/${match.source.name}/${viewName}`;
+        const url = `${viewerUrl()}/${match.source.prefix}/${viewName}`;
         return {
           content: [{ type: "text", text: JSON.stringify({ status: "ok", url }) }],
         };
@@ -146,9 +152,9 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
 
       case "list_paths": {
         const sections: string[] = [];
-        for (const source of config.sources) {
-          const files = await listFiles(source.directory);
-          const dir = path.resolve(source.directory);
+        for (const source of visibleSources) {
+          const files = await listFiles(source.root);
+          const dir = path.resolve(source.root);
           const paths = files.map((f) => path.join(dir, f.name));
           sections.push(
             `${dir}/\n${paths.length === 0 ? "  (empty)" : paths.map((p) => `  ${p}`).join("\n")}`,

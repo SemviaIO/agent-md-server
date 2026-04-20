@@ -1,5 +1,9 @@
+// `page.evaluate` callbacks run in the Playwright browser context where
+// `document` is defined. Scope DOM types to this file so tsc is happy.
+/// <reference lib="dom" />
+
 import { stat } from "node:fs/promises";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser } from "playwright";
 
 export interface RenderSuccess {
   status: "ok";
