@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 
 import { listFiles } from "../fs.js";
 import type { SourceConfig } from "../types.js";
+import { sendFsError } from "./errors.js";
 
 export function registerListingRoutes(
   app: FastifyInstance,
@@ -36,21 +37,6 @@ export async function sendListing(
     }));
     return reply.send(mapped);
   } catch (error: unknown) {
-    if (error instanceof Error) {
-      if ("code" in error && error.code === "ENOENT") {
-        return reply
-          .status(404)
-          .send({ error: `Directory "${subPath}" not found` });
-      }
-      if ("code" in error && error.code === "ENOTDIR") {
-        return reply
-          .status(404)
-          .send({ error: `"${subPath}" is not a directory` });
-      }
-      if (error.message.includes("Path traversal")) {
-        return reply.status(403).send({ error: "Forbidden" });
-      }
-    }
-    return reply.status(500).send({ error: "Internal server error" });
+    return sendFsError(reply, error, subPath);
   }
 }

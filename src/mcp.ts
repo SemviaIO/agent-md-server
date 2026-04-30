@@ -160,7 +160,7 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
           const dir = path.resolve(source.root);
           const paths = entries
             .filter((e) => e.kind === "file")
-            .map((f) => path.join(dir, f.name));
+            .map((f) => path.join(dir, f.path));
           sections.push(
             `${dir}/\n${paths.length === 0 ? "  (empty)" : paths.map((p) => `  ${p}`).join("\n")}`,
           );

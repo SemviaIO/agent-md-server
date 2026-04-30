@@ -1,3 +1,4 @@
+import path from "node:path";
 import { randomBytes } from "node:crypto";
 
 import Fastify, { type FastifyInstance } from "fastify";
@@ -8,6 +9,18 @@ import { registerFileRoutes } from "./routes/file.js";
 import { registerWatchRoutes } from "./routes/watch.js";
 import { renderShell } from "./templates/shell.js";
 import { renderListingPage } from "./templates/listing-page.js";
+
+/**
+ * URL of the parent directory for a sub-path captured by a wildcard route.
+ * For an empty sub-path (the source root) the parent stays at the source
+ * root URL, since there's nothing above it within the prefix.
+ */
+function parentUrlOf(urlPrefix: string, subPath: string): string {
+  const parent = path.posix.dirname(subPath);
+  return parent === "." || parent === "/" || parent === ""
+    ? `${urlPrefix}/`
+    : `${urlPrefix}/${parent}/`;
+}
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -46,7 +59,10 @@ export function createApp(config: Config): FastifyInstance {
   // Root index
   app.get("/", async (request, reply) => {
     void reply.type("text/html");
-    return renderListingPage("agent-md-server", request.nonce, visiblePrefixes);
+    return renderListingPage("agent-md-server", request.nonce, {
+      kind: "rootIndex",
+      sources: visiblePrefixes,
+    });
   });
 
   // Per-source HTML routes. A source prefix may contain "/" (e.g. "claude/plans"),
@@ -60,43 +76,44 @@ export function createApp(config: Config): FastifyInstance {
 
     app.get(`${urlPrefix}/`, async (request, reply) => {
       void reply.type("text/html");
-      // Source root: no parentUrl → "All sources" back-link.
-      return renderListingPage(source.prefix, request.nonce);
+      return renderListingPage(source.prefix, request.nonce, {
+        kind: "sourceRoot",
+      });
     });
 
-    app.get(`${urlPrefix}/*`, async (request, reply) => {
-      const captured = (request.params as { "*": string })["*"] ?? "";
+    app.get<{ Params: { "*": string } }>(
+      `${urlPrefix}/*`,
+      async (request, reply) => {
+        const captured = request.params["*"];
 
-      // Trailing slash → directory listing for a sub-path. The parent
-      // is the current sub-path with its last segment removed; if that
-      // strips back to the source root, parent is `${urlPrefix}/`.
-      if (captured.endsWith("/")) {
-        const subPath = captured.replace(/\/+$/, "");
-        const title = `${source.prefix}/${subPath}`;
-        const parentSub = subPath.replace(/[^/]+$/, "").replace(/\/+$/, "");
-        const parentUrl = parentSub === ""
-          ? `${urlPrefix}/`
-          : `${urlPrefix}/${parentSub}/`;
+        // Trailing slash → directory listing for a sub-path.
+        if (captured.endsWith("/")) {
+          const subPath = captured.replace(/\/+$/, "");
+          const title = `${source.prefix}/${subPath}`;
+          void reply.type("text/html");
+          return renderListingPage(title, request.nonce, {
+            kind: "subDir",
+            parentUrl: parentUrlOf(urlPrefix, subPath),
+          });
+        }
+
+        // `.md` URL → redirect to the clean (no-extension) form, preserving
+        // the captured subpath so nested files resolve correctly.
+        if (captured.endsWith(".md")) {
+          void reply.redirect(`${urlPrefix}/${captured.slice(0, -3)}`);
+          return;
+        }
+
+        // Otherwise: render the viewer shell for a clean file URL.
+        const titleName = path.posix.basename(captured);
         void reply.type("text/html");
-        return renderListingPage(title, request.nonce, undefined, parentUrl);
-      }
-
-      // `.md` URL → redirect to the clean (no-extension) form, preserving
-      // the captured subpath so nested files resolve correctly.
-      if (captured.endsWith(".md")) {
-        void reply.redirect(`${urlPrefix}/${captured.slice(0, -3)}`);
-        return;
-      }
-
-      // Otherwise: render the viewer shell for a clean file URL.
-      const lastSlash = captured.lastIndexOf("/");
-      const titleName = lastSlash >= 0 ? captured.slice(lastSlash + 1) : captured;
-      const parentSubPath = lastSlash >= 0 ? captured.slice(0, lastSlash + 1) : "";
-      const parentUrl = `${urlPrefix}/${parentSubPath}`;
-
-      void reply.type("text/html");
-      return renderShell(titleName, request.nonce, parentUrl);
-    });
+        return renderShell(
+          titleName,
+          request.nonce,
+          parentUrlOf(urlPrefix, captured),
+        );
+      },
+    );
   }
 
   return app;

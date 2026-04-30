@@ -1,19 +1,13 @@
-/**
- * Render the listing HTML shell.
- *
- * `sources` defined → root index (lists configured sources).
- * `parentUrl` defined → sub-directory listing with a "Parent directory"
- *   back-link to that URL.
- * Neither → source-root listing with the "All sources" back-link.
- */
+export type ListingMode =
+  | { kind: "rootIndex"; sources: string[] }
+  | { kind: "sourceRoot" }
+  | { kind: "subDir"; parentUrl: string };
+
 export function renderListingPage(
   title: string,
   nonce: string,
-  sources?: string[],
-  parentUrl?: string,
+  mode: ListingMode,
 ): string {
-  const isRootIndex = sources !== undefined;
-
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -127,7 +121,7 @@ export function renderListingPage(
 </head>
 <body>
   <div class="container">
-    ${renderBackLink(isRootIndex, parentUrl)}
+    ${renderBackLink(mode)}
     <h1 class="page-title">${escapeHtml(title)}</h1>
     <div id="listing">
       <p style="color:#8b949e;">Loading&hellip;</p>
@@ -136,7 +130,6 @@ export function renderListingPage(
 
   <script nonce="${nonce}">
     (function () {
-      var isRootIndex = ${String(isRootIndex)};
       var listingEl = document.getElementById('listing');
 
       function escapeForHtml(str) {
@@ -147,7 +140,7 @@ export function renderListingPage(
           .replace(/"/g, '&quot;');
       }
 
-      ${isRootIndex ? renderRootIndexScript(sources!) : renderFileListingScript()}
+      ${mode.kind === "rootIndex" ? renderRootIndexScript(mode.sources) : renderFileListingScript()}
     })();
   </script>
 </body>
@@ -248,15 +241,15 @@ function renderFileListingScript() {
   `;
 }
 
-function renderBackLink(
-  isRootIndex: boolean,
-  parentUrl: string | undefined,
-): string {
-  if (isRootIndex) return "";
-  if (parentUrl !== undefined) {
-    return `<a class="back-link" href="${escapeHtml(parentUrl)}">&larr; Parent directory</a>`;
+function renderBackLink(mode: ListingMode): string {
+  switch (mode.kind) {
+    case "rootIndex":
+      return "";
+    case "subDir":
+      return `<a class="back-link" href="${escapeHtml(mode.parentUrl)}">&larr; Parent directory</a>`;
+    case "sourceRoot":
+      return '<a class="back-link" href="/">&larr; All sources</a>';
   }
-  return '<a class="back-link" href="/">&larr; All sources</a>';
 }
 
 function escapeHtml(text: string) {
