@@ -8,10 +8,16 @@ export function registerWatchRoutes(
   sources: SourceConfig[],
 ): void {
   for (const source of sources) {
-    app.get(`/events/${source.prefix}/:file`, async (request, reply) => {
-      const { file: filename } = request.params as { file: string };
+    app.get(`/events/${source.prefix}/*`, async (request, reply) => {
+      const filename = (request.params as { "*": string })["*"] ?? "";
 
-      // Validate the file exists before setting up the watcher
+      if (!filename.endsWith(".md")) {
+        return reply.status(404).send({ error: "Only .md files are served" });
+      }
+
+      // Validate the file via readMarkdown (full resolveSafePath check)
+      // BEFORE wiring the watcher. watchFile only does a synchronous
+      // prefix check, so symlink-escape detection lives here.
       try {
         await readMarkdown(source.root, filename);
       } catch (error: unknown) {

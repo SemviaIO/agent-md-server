@@ -1,7 +1,16 @@
+/**
+ * Render the listing HTML shell.
+ *
+ * `sources` defined → root index (lists configured sources).
+ * `parentUrl` defined → sub-directory listing with a "Parent directory"
+ *   back-link to that URL.
+ * Neither → source-root listing with the "All sources" back-link.
+ */
 export function renderListingPage(
   title: string,
   nonce: string,
   sources?: string[],
+  parentUrl?: string,
 ): string {
   const isRootIndex = sources !== undefined;
 
@@ -118,7 +127,7 @@ export function renderListingPage(
 </head>
 <body>
   <div class="container">
-    ${isRootIndex ? "" : '<a class="back-link" href="/">&larr; All sources</a>'}
+    ${renderBackLink(isRootIndex, parentUrl)}
     <h1 class="page-title">${escapeHtml(title)}</h1>
     <div id="listing">
       <p style="color:#8b949e;">Loading&hellip;</p>
@@ -187,29 +196,45 @@ function renderFileListingScript() {
         return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
       }
 
-      var apiUrl = '/api' + window.location.pathname;
+      // Trim a trailing slash from the current pathname so it can be
+      // composed with the API prefix uniformly. Sub-listing pages live
+      // at e.g. '/plans/sub/' but the API expects '/api/plans/sub'.
+      var pathnameNoTrail = window.location.pathname.replace(/\\/+$/, '');
+      var apiUrl = '/api' + pathnameNoTrail + '/';
 
       fetch(apiUrl)
         .then(function (res) {
           if (!res.ok) throw new Error('Failed to fetch: ' + res.status);
           return res.json();
         })
-        .then(function (files) {
-          if (!files || files.length === 0) {
+        .then(function (entries) {
+          if (!entries || entries.length === 0) {
             listingEl.innerHTML = '<div class="empty-state">No files found.</div>';
             return;
           }
           var html = '<table class="file-table">'
             + '<thead><tr><th>Name</th><th>Modified</th><th>Size</th></tr></thead>'
             + '<tbody>';
-          for (var i = 0; i < files.length; i++) {
-            var f = files[i];
-            var linkName = f.name.endsWith('.md') ? f.name.slice(0, -3) : f.name;
-            var href = window.location.pathname.replace(/\\/$/, '') + '/' + linkName;
+          for (var i = 0; i < entries.length; i++) {
+            var e = entries[i];
+            // The server supplies entry.path as an absolute URL path
+            // anchored at the source prefix, e.g. '/plans/sub/foo.md'.
+            // For dirs we add a trailing slash and skip the .md strip;
+            // for files we strip the .md suffix to get the clean URL.
+            var href, displayName, sizeCell;
+            if (e.kind === 'dir') {
+              href = e.path + '/';
+              displayName = e.name + '/';
+              sizeCell = '';
+            } else {
+              href = e.path.endsWith('.md') ? e.path.slice(0, -3) : e.path;
+              displayName = e.name;
+              sizeCell = escapeForHtml(formatSize(e.size));
+            }
             html += '<tr>'
-              + '<td><a href="' + escapeForHtml(href) + '">' + escapeForHtml(f.name) + '</a></td>'
-              + '<td class="meta">' + escapeForHtml(formatRelativeTime(f.modified)) + '</td>'
-              + '<td class="meta">' + escapeForHtml(formatSize(f.size)) + '</td>'
+              + '<td><a href="' + escapeForHtml(href) + '">' + escapeForHtml(displayName) + '</a></td>'
+              + '<td class="meta">' + escapeForHtml(formatRelativeTime(e.modified)) + '</td>'
+              + '<td class="meta">' + sizeCell + '</td>'
               + '</tr>';
           }
           html += '</tbody></table>';
@@ -221,6 +246,17 @@ function renderFileListingScript() {
             + '</div>';
         });
   `;
+}
+
+function renderBackLink(
+  isRootIndex: boolean,
+  parentUrl: string | undefined,
+): string {
+  if (isRootIndex) return "";
+  if (parentUrl !== undefined) {
+    return `<a class="back-link" href="${escapeHtml(parentUrl)}">&larr; Parent directory</a>`;
+  }
+  return '<a class="back-link" href="/">&larr; All sources</a>';
 }
 
 function escapeHtml(text: string) {

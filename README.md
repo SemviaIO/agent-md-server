@@ -7,6 +7,7 @@ A thin server for helping you and your agent of choice communicate with rendered
 - Renders Mermaid diagrams with dark theme support
 - GitHub-style markdown rendering with syntax highlighting
 - Config-driven source directories (serve multiple folders)
+- Recursive directory browsing — point a source at a tree and navigate it lazily, one directory per request
 - Live reload via Server-Sent Events (SSE) -- pages update when files change
 - Tailscale integration for secure remote access
 - MCP server for agent integration (write, edit, and validate documents)
@@ -119,15 +120,28 @@ If the `tailscale` command is not found, the server continues without it and pri
 ## URL scheme
 
 ```
-/                         Index (lists all sources)
-/:source/                 File listing for a source
-/:source/foo              Rendered markdown view (clean URL, no .md)
-/api/:source/             JSON file listing
-/api/:source/foo.md       Raw markdown content
-/events/:source/foo.md    SSE stream (emits on file change)
+/                              Index (lists all sources)
+/:source/                      Listing for a source root
+/:source/sub/                  Listing for a sub-directory
+/:source/foo                   Rendered markdown (clean URL, no .md)
+/:source/sub/foo               Rendered markdown for a nested file
+/api/:source/                  JSON listing (files + directories)
+/api/:source/sub/              JSON listing for a sub-directory
+/api/:source/foo.md            Raw markdown content
+/api/:source/sub/foo.md        Raw markdown for a nested file
+/events/:source/foo.md         SSE stream (emits on file change)
+/events/:source/sub/foo.md     SSE stream for a nested file
 ```
 
 `:source` may itself be a multi-segment prefix (e.g. `claude/plans`), in which case the URLs include each segment — `/claude/plans/foo`, `/api/claude/plans/foo.md`, etc.
+
+Sub-paths under a source are resolved lazily: each listing request reads exactly the directory it lists, with no upfront scan. Listings include both `.md` files and subdirectories (entries carry a `kind: "file" | "dir"` field). The following directory names are silently omitted from listings as a noise filter, so a source can safely point at a dev tree like `~/projects`:
+
+```
+node_modules, .git, dist, build, target, .next, .venv, __pycache__
+```
+
+The denylist is a discovery filter only — direct URLs into those directories still resolve via the same `resolveSafePath` jail used by every other read.
 
 The `/api/` endpoints return JSON (listings) or raw markdown (files).
 The `/events/` endpoint opens a persistent SSE connection that sends a `changed` event whenever the file is modified on disk.

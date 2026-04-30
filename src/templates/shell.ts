@@ -1,7 +1,7 @@
 export function renderShell(
   title: string,
   nonce: string,
-  sourcePrefix: string,
+  parentUrl: string,
 ): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -76,7 +76,7 @@ export function renderShell(
 <body>
   <div class="status-banner" id="status"></div>
   <div class="container">
-    <a class="back-link" href="/${escapeHtml(sourcePrefix)}/">&larr; Back</a>
+    <a class="back-link" href="${escapeHtml(parentUrl)}">&larr; Back</a>
     <h1 class="page-title">${escapeHtml(title)}</h1>
     <div class="markdown-body" id="content">
       <p style="color:#8b949e;">Loading&hellip;</p>

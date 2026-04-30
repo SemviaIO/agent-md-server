@@ -1,7 +1,11 @@
 export interface FileEntry {
   name: string;
+  /** Path relative to the source root, posix-style (forward slashes). */
   path: string;
+  /** Discriminator used by listing consumers. Files end in `.md`; dirs are navigable. */
+  kind: "file" | "dir";
   modified: string;
+  /** 0 for directories. */
   size: number;
 }
 
