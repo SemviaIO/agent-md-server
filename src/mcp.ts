@@ -153,9 +153,14 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
       case "list_paths": {
         const sections: string[] = [];
         for (const source of visibleSources) {
-          const files = await listFiles(source.root);
+          // listFiles now returns dir entries too; this tool's contract
+          // is "all markdown files… as absolute paths", so filter to
+          // files only. Recursing into subdirectories is a follow-up.
+          const entries = await listFiles(source.root);
           const dir = path.resolve(source.root);
-          const paths = files.map((f) => path.join(dir, f.name));
+          const paths = entries
+            .filter((e) => e.kind === "file")
+            .map((f) => path.join(dir, f.path));
           sections.push(
             `${dir}/\n${paths.length === 0 ? "  (empty)" : paths.map((p) => `  ${p}`).join("\n")}`,
           );

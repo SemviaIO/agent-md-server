@@ -1,10 +1,13 @@
+export type ListingMode =
+  | { kind: "rootIndex"; sources: string[] }
+  | { kind: "sourceRoot" }
+  | { kind: "subDir"; parentUrl: string };
+
 export function renderListingPage(
   title: string,
   nonce: string,
-  sources?: string[],
+  mode: ListingMode,
 ): string {
-  const isRootIndex = sources !== undefined;
-
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -118,7 +121,7 @@ export function renderListingPage(
 </head>
 <body>
   <div class="container">
-    ${isRootIndex ? "" : '<a class="back-link" href="/">&larr; All sources</a>'}
+    ${renderBackLink(mode)}
     <h1 class="page-title">${escapeHtml(title)}</h1>
     <div id="listing">
       <p style="color:#8b949e;">Loading&hellip;</p>
@@ -127,7 +130,6 @@ export function renderListingPage(
 
   <script nonce="${nonce}">
     (function () {
-      var isRootIndex = ${String(isRootIndex)};
       var listingEl = document.getElementById('listing');
 
       function escapeForHtml(str) {
@@ -138,7 +140,7 @@ export function renderListingPage(
           .replace(/"/g, '&quot;');
       }
 
-      ${isRootIndex ? renderRootIndexScript(sources!) : renderFileListingScript()}
+      ${mode.kind === "rootIndex" ? renderRootIndexScript(mode.sources) : renderFileListingScript()}
     })();
   </script>
 </body>
@@ -187,29 +189,45 @@ function renderFileListingScript() {
         return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
       }
 
-      var apiUrl = '/api' + window.location.pathname;
+      // Trim a trailing slash from the current pathname so it can be
+      // composed with the API prefix uniformly. Sub-listing pages live
+      // at e.g. '/plans/sub/' but the API expects '/api/plans/sub'.
+      var pathnameNoTrail = window.location.pathname.replace(/\\/+$/, '');
+      var apiUrl = '/api' + pathnameNoTrail + '/';
 
       fetch(apiUrl)
         .then(function (res) {
           if (!res.ok) throw new Error('Failed to fetch: ' + res.status);
           return res.json();
         })
-        .then(function (files) {
-          if (!files || files.length === 0) {
+        .then(function (entries) {
+          if (!entries || entries.length === 0) {
             listingEl.innerHTML = '<div class="empty-state">No files found.</div>';
             return;
           }
           var html = '<table class="file-table">'
             + '<thead><tr><th>Name</th><th>Modified</th><th>Size</th></tr></thead>'
             + '<tbody>';
-          for (var i = 0; i < files.length; i++) {
-            var f = files[i];
-            var linkName = f.name.endsWith('.md') ? f.name.slice(0, -3) : f.name;
-            var href = window.location.pathname.replace(/\\/$/, '') + '/' + linkName;
+          for (var i = 0; i < entries.length; i++) {
+            var e = entries[i];
+            // The server supplies entry.path as an absolute URL path
+            // anchored at the source prefix, e.g. '/plans/sub/foo.md'.
+            // For dirs we add a trailing slash and skip the .md strip;
+            // for files we strip the .md suffix to get the clean URL.
+            var href, displayName, sizeCell;
+            if (e.kind === 'dir') {
+              href = e.path + '/';
+              displayName = e.name + '/';
+              sizeCell = '';
+            } else {
+              href = e.path.endsWith('.md') ? e.path.slice(0, -3) : e.path;
+              displayName = e.name;
+              sizeCell = escapeForHtml(formatSize(e.size));
+            }
             html += '<tr>'
-              + '<td><a href="' + escapeForHtml(href) + '">' + escapeForHtml(f.name) + '</a></td>'
-              + '<td class="meta">' + escapeForHtml(formatRelativeTime(f.modified)) + '</td>'
-              + '<td class="meta">' + escapeForHtml(formatSize(f.size)) + '</td>'
+              + '<td><a href="' + escapeForHtml(href) + '">' + escapeForHtml(displayName) + '</a></td>'
+              + '<td class="meta">' + escapeForHtml(formatRelativeTime(e.modified)) + '</td>'
+              + '<td class="meta">' + sizeCell + '</td>'
               + '</tr>';
           }
           html += '</tbody></table>';
@@ -221,6 +239,17 @@ function renderFileListingScript() {
             + '</div>';
         });
   `;
+}
+
+function renderBackLink(mode: ListingMode): string {
+  switch (mode.kind) {
+    case "rootIndex":
+      return "";
+    case "subDir":
+      return `<a class="back-link" href="${escapeHtml(mode.parentUrl)}">&larr; Parent directory</a>`;
+    case "sourceRoot":
+      return '<a class="back-link" href="/">&larr; All sources</a>';
+  }
 }
 
 function escapeHtml(text: string) {

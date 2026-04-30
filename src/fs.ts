@@ -5,6 +5,29 @@ import path from "node:path";
 import type { FileEntry } from "./types.js";
 
 /**
+ * Discovery filter applied to directory listings. Anything in this set is
+ * silently omitted when enumerating subdirectories so a source pointed at
+ * a dev tree (e.g. `~/projects`) does not surface noisy build / VCS
+ * artefacts.
+ *
+ * This is *not* a security boundary. `resolveSafePath` does not consult
+ * this set, so a direct URL like `/api/<prefix>/node_modules/foo.md`
+ * still resolves and serves the file. The product position is that the
+ * denylist prevents accidental discovery, while the symlink/traversal
+ * jail in `resolveSafePath` is what guards against escape.
+ */
+const IGNORED_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  "target",
+  ".next",
+  ".venv",
+  "__pycache__",
+]);
+
+/**
  * Resolve a filename within a source directory, rejecting any path that
  * escapes the jail. This is the critical security boundary -- every
  * filesystem read must go through this function.
@@ -46,30 +69,58 @@ export async function resolveSafePath(
   return realResolved;
 }
 
-export async function listFiles(sourceDir: string): Promise<FileEntry[]> {
-  const entries = await readdir(sourceDir);
+/**
+ * List the immediate children of `sourceDir/subPath` as a flat array of
+ * file and directory entries. One `readdir` per call -- no recursion.
+ * Directories in `IGNORED_DIRS` are filtered out; non-`.md` files are
+ * filtered out. The security boundary is `resolveSafePath`, which is
+ * called on the resolved target before reading.
+ *
+ * Sort order: directories first (alphabetical), then `.md` files
+ * (most-recently-modified first -- preserves the flat-source default).
+ */
+export async function listFiles(
+  sourceDir: string,
+  subPath = "",
+): Promise<FileEntry[]> {
+  const targetDir = await resolveSafePath(sourceDir, subPath);
+  const entries = await readdir(targetDir, { withFileTypes: true });
 
-  const mdFiles = entries.filter((name) => name.endsWith(".md"));
+  const dirEntries: FileEntry[] = [];
+  const fileEntries: FileEntry[] = [];
 
-  const fileEntries = await Promise.all(
-    mdFiles.map(async (name) => {
-      const filePath = path.join(sourceDir, name);
-      const fileStat = await stat(filePath);
-      return {
-        name,
-        path: name,
-        modified: fileStat.mtime.toISOString(),
-        size: fileStat.size,
-      } satisfies FileEntry;
+  await Promise.all(
+    entries.map(async (entry) => {
+      if (entry.isDirectory()) {
+        if (IGNORED_DIRS.has(entry.name)) return;
+        const dirPath = path.join(targetDir, entry.name);
+        const dirStat = await stat(dirPath);
+        dirEntries.push({
+          kind: "dir",
+          name: entry.name,
+          path: path.posix.join(subPath, entry.name),
+          modified: dirStat.mtime.toISOString(),
+        });
+      } else if (entry.isFile() && entry.name.endsWith(".md")) {
+        const filePath = path.join(targetDir, entry.name);
+        const fileStat = await stat(filePath);
+        fileEntries.push({
+          kind: "file",
+          name: entry.name,
+          path: path.posix.join(subPath, entry.name),
+          modified: fileStat.mtime.toISOString(),
+          size: fileStat.size,
+        });
+      }
     }),
   );
 
-  // Most recently modified first
+  dirEntries.sort((a, b) => a.name.localeCompare(b.name));
   fileEntries.sort(
     (a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime(),
   );
 
-  return fileEntries;
+  return [...dirEntries, ...fileEntries];
 }
 
 export async function readMarkdown(
@@ -89,9 +140,10 @@ export function watchFile(
   const joined = path.resolve(resolvedRoot, filename);
 
   // Synchronous prefix check -- the same logic as resolveSafePath but
-  // without the async realpath step. For watch we accept the normalised
-  // path; the initial read that precedes the watch should have already
-  // gone through resolveSafePath with the full symlink check.
+  // without the async realpath step. Callers MUST run readMarkdown (or
+  // an equivalent resolveSafePath call) before invoking watchFile, since
+  // that is what catches symlink escapes; this function only validates
+  // the normalised lexical path.
   if (joined !== resolvedRoot && !joined.startsWith(resolvedRoot + path.sep)) {
     throw new Error(
       `Path traversal attempt: "${filename}" resolves outside source directory`,
