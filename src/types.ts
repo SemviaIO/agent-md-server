@@ -1,13 +1,24 @@
-export interface FileEntry {
-  name: string;
-  /** Path relative to the source root, posix-style (forward slashes). */
-  path: string;
-  /** Discriminator used by listing consumers. Files end in `.md`; dirs are navigable. */
-  kind: "file" | "dir";
-  modified: string;
-  /** 0 for directories. */
-  size: number;
-}
+/**
+ * Listing entry — discriminated union so consumers can only access
+ * `size` after narrowing on `kind === "file"`.
+ *
+ * `path` is always posix-style (forward slashes), relative to the
+ * configured source root.
+ */
+export type FileEntry =
+  | {
+      kind: "file";
+      name: string;
+      path: string;
+      modified: string;
+      size: number;
+    }
+  | {
+      kind: "dir";
+      name: string;
+      path: string;
+      modified: string;
+    };
 
 export interface SourceConfig {
   /** URL path prefix, e.g. "plans" or "claude/plans". */

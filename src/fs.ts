@@ -96,19 +96,18 @@ export async function listFiles(
         const dirPath = path.join(targetDir, entry.name);
         const dirStat = await stat(dirPath);
         dirEntries.push({
+          kind: "dir",
           name: entry.name,
           path: path.posix.join(subPath, entry.name),
-          kind: "dir",
           modified: dirStat.mtime.toISOString(),
-          size: 0,
         });
       } else if (entry.isFile() && entry.name.endsWith(".md")) {
         const filePath = path.join(targetDir, entry.name);
         const fileStat = await stat(filePath);
         fileEntries.push({
+          kind: "file",
           name: entry.name,
           path: path.posix.join(subPath, entry.name),
-          kind: "file",
           modified: fileStat.mtime.toISOString(),
           size: fileStat.size,
         });

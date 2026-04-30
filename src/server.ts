@@ -1,11 +1,12 @@
 import path from "node:path";
 import { randomBytes } from "node:crypto";
+import { stat } from "node:fs/promises";
 
 import Fastify, { type FastifyInstance } from "fastify";
 
 import type { Config } from "./types.js";
-import { registerListingRoutes } from "./routes/listing.js";
-import { registerFileRoutes } from "./routes/file.js";
+import { resolveSafePath } from "./fs.js";
+import { registerApiRoutes } from "./routes/api.js";
 import { registerWatchRoutes } from "./routes/watch.js";
 import { renderShell } from "./templates/shell.js";
 import { renderListingPage } from "./templates/listing-page.js";
@@ -52,8 +53,7 @@ export function createApp(config: Config): FastifyInstance {
 
   // API and SSE routes (hidden sources still get routes — `hidden` only
   // controls discovery, not reachability)
-  registerListingRoutes(app, config.sources);
-  registerFileRoutes(app, config.sources);
+  registerApiRoutes(app, config.sources);
   registerWatchRoutes(app, config.sources);
 
   // Root index
@@ -102,6 +102,24 @@ export function createApp(config: Config): FastifyInstance {
         if (captured.endsWith(".md")) {
           void reply.redirect(`${urlPrefix}/${captured.slice(0, -3)}`);
           return;
+        }
+
+        // If the captured path resolves to a directory on disk, redirect
+        // to the trailing-slash form so users typing /<prefix>/<sub>
+        // land on the listing rather than a 404'ing viewer shell. We
+        // resolve through resolveSafePath first so the stat is jailed
+        // by the same boundary as every other read; on traversal/missing
+        // we silently fall through to the viewer (the API fetch will
+        // surface the right error to the user).
+        try {
+          const safe = await resolveSafePath(source.root, captured);
+          const s = await stat(safe);
+          if (s.isDirectory()) {
+            void reply.redirect(`${urlPrefix}/${captured}/`);
+            return;
+          }
+        } catch {
+          // intentional: fall through to viewer shell
         }
 
         // Otherwise: render the viewer shell for a clean file URL.
