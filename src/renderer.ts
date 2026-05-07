@@ -3,7 +3,7 @@
 /// <reference lib="dom" />
 
 import { stat } from "node:fs/promises";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type BrowserContext } from "playwright";
 
 export interface RenderSuccess {
   status: "ok";
@@ -26,6 +26,11 @@ export type RenderResult = RenderSuccess | RenderError;
  */
 export class Renderer {
   private browser: Browser | undefined;
+  // Shared in-flight launch promise so concurrent ensureBrowser() callers
+  // converge on a single chromium.launch(). Each launch registers a Mach
+  // service on macOS; without this, a launch race leaks registrations the
+  // parent never releases (issue #22).
+  private launchPromise: Promise<Browser> | undefined;
   private cache = new Map<string, RenderResult>();
   private baseUrl: string;
 
@@ -34,10 +39,40 @@ export class Renderer {
   }
 
   private async ensureBrowser(): Promise<Browser> {
-    if (!this.browser || !this.browser.isConnected()) {
-      this.browser = await chromium.launch({ headless: true });
+    if (this.browser?.isConnected()) {
+      return this.browser;
     }
-    return this.browser;
+    if (!this.launchPromise) {
+      console.log("[renderer] launching chromium");
+      // Self-referential token: the promise compares itself against
+      // `this.launchPromise` so disconnect / launch-failure handlers can
+      // tell whether a *later* launch has already replaced them before
+      // clearing the slot.
+      const launching: Promise<Browser> = chromium.launch({ headless: true })
+        .then((browser) => {
+          browser.on("disconnected", () => {
+            console.log("[renderer] browser disconnected");
+            if (this.browser === browser) {
+              this.browser = undefined;
+            }
+            if (this.launchPromise === launching) {
+              this.launchPromise = undefined;
+            }
+          });
+          this.browser = browser;
+          return browser;
+        })
+        .catch((error: unknown) => {
+          // A failed launch must not leave a rejected promise that future
+          // callers re-await.
+          if (this.launchPromise === launching) {
+            this.launchPromise = undefined;
+          }
+          throw error;
+        });
+      this.launchPromise = launching;
+    }
+    return this.launchPromise;
   }
 
   /**
@@ -60,7 +95,11 @@ export class Renderer {
     }
 
     const browser = await this.ensureBrowser();
-    const page = await browser.newPage();
+    // Per-render context releases Playwright-internal context state
+    // deterministically when closed, even though the browser process is
+    // shared across renders.
+    const context: BrowserContext = await browser.newContext();
+    const page = await context.newPage();
 
     try {
       const viewerUrl = `${this.baseUrl}/${sourceName}/${fileName}`;
@@ -97,7 +136,8 @@ export class Renderer {
       this.cache.set(filePath, result);
       return result;
     } finally {
-      await page.close();
+      // Closing the context closes its pages — no separate page.close().
+      await context.close();
     }
   }
 
@@ -112,7 +152,9 @@ export class Renderer {
   }
 
   async close(): Promise<void> {
-    await this.browser?.close();
+    const browser = this.browser;
     this.browser = undefined;
+    this.launchPromise = undefined;
+    await browser?.close();
   }
 }
