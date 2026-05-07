@@ -11,7 +11,10 @@
     "build": "tsup",
     "dev": "tsx src/main.ts",
     "start": "node dist/main.js",
-    "start:tailscale": "node dist/main.js --tailscale"
+    "start:tailscale": "node dist/main.js --tailscale",
+    "typecheck": "tsc --noEmit",
+    "preflight": "pnpm typecheck && pnpm build",
+    "stress": "tsx scripts/stress-renderer.ts"
   },
   "keywords": [
     "mermaid",
