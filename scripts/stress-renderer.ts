@@ -35,6 +35,16 @@ interface RenderFail {
 
 type RenderOutcome = RenderOk | RenderFail;
 
+function parseNonNegInt(name: string, raw: string): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+    throw new Error(
+      `--${name}: expected a non-negative integer, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return n;
+}
+
 function parseOptions(): Options {
   const { values } = parseArgs({
     options: {
@@ -52,10 +62,10 @@ function parseOptions(): Options {
   });
 
   return {
-    count: Number(values.count),
-    maxLaunches: Number(values["max-launches"]),
+    count: parseNonNegInt("count", String(values.count)),
+    maxLaunches: parseNonNegInt("max-launches", String(values["max-launches"])),
     logPath: String(values["log-path"]),
-    concurrency: Number(values.concurrency),
+    concurrency: parseNonNegInt("concurrency", String(values.concurrency)),
     endpoint: String(values.endpoint),
     workDir: String(values["work-dir"]),
   };

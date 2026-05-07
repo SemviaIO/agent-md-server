@@ -137,7 +137,13 @@ export class Renderer {
       return result;
     } finally {
       // Closing the context closes its pages — no separate page.close().
-      await context.close();
+      // Swallow close-time errors so a try-block throw isn't masked by a
+      // disconnect-during-close.
+      try {
+        await context.close();
+      } catch (closeError: unknown) {
+        console.warn("[renderer] context close failed:", String(closeError));
+      }
     }
   }
 
@@ -152,7 +158,16 @@ export class Renderer {
   }
 
   async close(): Promise<void> {
-    const browser = this.browser;
+    // If a launch is mid-flight, await it (swallowing rejection) before
+    // clearing the slot — otherwise the .then handler runs after we've
+    // released our reference and assigns this.browser to a Browser we
+    // never close, defeating the dispose contract.
+    const pending = this.launchPromise;
+    const browser =
+      this.browser ??
+      (pending
+        ? await pending.catch(() => undefined as Browser | undefined)
+        : undefined);
     this.browser = undefined;
     this.launchPromise = undefined;
     await browser?.close();
