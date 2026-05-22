@@ -28,6 +28,17 @@ const IGNORED_DIRS = new Set([
 ]);
 
 /**
+ * File extensions the server hosts. `.md` is rendered through the markdown
+ * viewer; `.html` is served as-is. Anything else is omitted from listings
+ * and 404s on direct fetch.
+ */
+const SERVED_EXTENSIONS = [".md", ".html"];
+
+export function isServedFile(name: string): boolean {
+  return SERVED_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
+
+/**
  * Resolve a filename within a source directory, rejecting any path that
  * escapes the jail. This is the critical security boundary -- every
  * filesystem read must go through this function.
@@ -72,11 +83,12 @@ export async function resolveSafePath(
 /**
  * List the immediate children of `sourceDir/subPath` as a flat array of
  * file and directory entries. One `readdir` per call -- no recursion.
- * Directories in `IGNORED_DIRS` are filtered out; non-`.md` files are
- * filtered out. The security boundary is `resolveSafePath`, which is
- * called on the resolved target before reading.
+ * Directories in `IGNORED_DIRS` are filtered out; files whose extension
+ * is not in `SERVED_EXTENSIONS` are filtered out. The security boundary
+ * is `resolveSafePath`, which is called on the resolved target before
+ * reading.
  *
- * Sort order: directories first (alphabetical), then `.md` files
+ * Sort order: directories first (alphabetical), then files
  * (most-recently-modified first -- preserves the flat-source default).
  */
 export async function listFiles(
@@ -101,7 +113,7 @@ export async function listFiles(
           path: path.posix.join(subPath, entry.name),
           modified: dirStat.mtime.toISOString(),
         });
-      } else if (entry.isFile() && entry.name.endsWith(".md")) {
+      } else if (entry.isFile() && isServedFile(entry.name)) {
         const filePath = path.join(targetDir, entry.name);
         const fileStat = await stat(filePath);
         fileEntries.push({
@@ -123,7 +135,7 @@ export async function listFiles(
   return [...dirEntries, ...fileEntries];
 }
 
-export async function readMarkdown(
+export async function readSourceFile(
   sourceDir: string,
   filename: string,
 ): Promise<string> {
@@ -140,7 +152,7 @@ export function watchFile(
   const joined = path.resolve(resolvedRoot, filename);
 
   // Synchronous prefix check -- the same logic as resolveSafePath but
-  // without the async realpath step. Callers MUST run readMarkdown (or
+  // without the async realpath step. Callers MUST run readSourceFile (or
   // an equivalent resolveSafePath call) before invoking watchFile, since
   // that is what catches symlink escapes; this function only validates
   // the normalised lexical path.

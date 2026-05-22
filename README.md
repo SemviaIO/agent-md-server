@@ -23,8 +23,9 @@ node dist/main.js
 
 Open <http://localhost:3333/> in your browser.
 
-The server watches configured source directories for `.md` files and renders them on demand.
-No build step is needed for content -- write a markdown file, open the URL, and it appears.
+The server serves `.md` files (rendered on demand) and `.html` files (served as-is) from
+the configured source directories.
+No build step is needed for content -- write a file, open the URL, and it appears.
 
 ## Configuration
 
@@ -125,17 +126,19 @@ If the `tailscale` command is not found, the server continues without it and pri
 /:source/sub/                  Listing for a sub-directory
 /:source/foo                   Rendered markdown (clean URL, no .md)
 /:source/sub/foo               Rendered markdown for a nested file
+/:source/page.html             Hosted HTML file (served as-is)
 /api/:source/                  JSON listing (files + directories)
 /api/:source/sub/              JSON listing for a sub-directory
 /api/:source/foo.md            Raw markdown content
 /api/:source/sub/foo.md        Raw markdown for a nested file
+/api/:source/page.html         Raw HTML content
 /events/:source/foo.md         SSE stream (emits on file change)
 /events/:source/sub/foo.md     SSE stream for a nested file
 ```
 
 `:source` may itself be a multi-segment prefix (e.g. `claude/plans`), in which case the URLs include each segment — `/claude/plans/foo`, `/api/claude/plans/foo.md`, etc.
 
-Sub-paths under a source are resolved lazily: each listing request reads exactly the directory it lists, with no upfront scan. Listings include both `.md` files and subdirectories (entries carry a `kind: "file" | "dir"` field). The following directory names are silently omitted from listings as a noise filter, so a source can safely point at a dev tree like `~/projects`:
+Sub-paths under a source are resolved lazily: each listing request reads exactly the directory it lists, with no upfront scan. Listings include `.md` files, `.html` files, and subdirectories (entries carry a `kind: "file" | "dir"` field). `.html` files are served as-is for the browser to render natively — the markdown viewer shell and SSE live-reload apply only to `.md` files. Because hosted HTML carries its own inline scripts and styles, the strict nonce-based Content-Security-Policy is dropped for raw HTML responses. The following directory names are silently omitted from listings as a noise filter, so a source can safely point at a dev tree like `~/projects`:
 
 ```
 node_modules, .git, dist, build, target, .next, .venv, __pycache__
@@ -143,7 +146,7 @@ node_modules, .git, dist, build, target, .next, .venv, __pycache__
 
 The denylist is a discovery filter only — direct URLs into those directories still resolve via the same `resolveSafePath` jail used by every other read.
 
-The `/api/` endpoints return JSON (listings) or raw markdown (files).
+The `/api/` endpoints return JSON (listings) or raw file content (`.md` as `text/markdown`, `.html` as `text/html`).
 The `/events/` endpoint opens a persistent SSE connection that sends a `changed` event whenever the file is modified on disk.
 The HTML views use these APIs internally -- the browser fetches markdown via `/api/`, renders it client-side, and subscribes to `/events/` for live updates.
 

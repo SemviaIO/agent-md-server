@@ -1,7 +1,7 @@
 import type { FastifyReply } from "fastify";
 
 /**
- * Map a filesystem error from `resolveSafePath` / `readMarkdown` /
+ * Map a filesystem error from `resolveSafePath` / `readSourceFile` /
  * `listFiles` to the appropriate HTTP status. Centralises the mapping
  * so every route surfaces a consistent shape:
  *
