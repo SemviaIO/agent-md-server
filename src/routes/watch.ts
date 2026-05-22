@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 
-import { readMarkdown, watchFile } from "../fs.js";
+import { readSourceFile, watchFile } from "../fs.js";
 import type { SourceConfig } from "../types.js";
 import { sendFsError } from "./errors.js";
 
@@ -18,11 +18,11 @@ export function registerWatchRoutes(
           return reply.status(404).send({ error: "Only .md files are served" });
         }
 
-        // Validate the file via readMarkdown (full resolveSafePath check)
+        // Validate the file via readSourceFile (full resolveSafePath check)
         // BEFORE wiring the watcher. watchFile only does a synchronous
         // prefix check, so symlink-escape detection lives here.
         try {
-          await readMarkdown(source.root, filename);
+          await readSourceFile(source.root, filename);
         } catch (error: unknown) {
           return sendFsError(reply, error, filename);
         }

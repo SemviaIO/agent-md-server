@@ -5,9 +5,10 @@ import { stat } from "node:fs/promises";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import type { Config } from "./types.js";
-import { resolveSafePath } from "./fs.js";
+import { resolveSafePath, readSourceFile } from "./fs.js";
 import { registerApiRoutes } from "./routes/api.js";
 import { registerWatchRoutes } from "./routes/watch.js";
+import { sendFsError } from "./routes/errors.js";
 import { renderShell } from "./templates/shell.js";
 import { renderListingPage } from "./templates/listing-page.js";
 
@@ -102,6 +103,21 @@ export function createApp(config: Config): FastifyInstance {
         if (captured.endsWith(".md")) {
           void reply.redirect(`${urlPrefix}/${captured.slice(0, -3)}`);
           return;
+        }
+
+        // `.html` URL → serve the file as-is for the browser to render
+        // natively (no markdown viewer shell). The strict nonce CSP is
+        // dropped here: hosted HTML carries its own inline scripts and
+        // styles that cannot be nonce-tagged, so the CSP would break it.
+        if (captured.endsWith(".html")) {
+          try {
+            const content = await readSourceFile(source.root, captured);
+            void reply.removeHeader("Content-Security-Policy");
+            void reply.type("text/html");
+            return content;
+          } catch (error: unknown) {
+            return sendFsError(reply, error, captured);
+          }
         }
 
         // If the captured path resolves to a directory on disk, redirect

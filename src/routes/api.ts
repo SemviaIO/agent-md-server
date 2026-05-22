@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 
-import { listFiles, readMarkdown } from "../fs.js";
+import { listFiles, readSourceFile } from "../fs.js";
 import type { SourceConfig } from "../types.js";
 import { sendFsError } from "./errors.js";
 
@@ -13,6 +13,7 @@ import { sendFsError } from "./errors.js";
  *   /api/${prefix}/*   — catch-all dispatching by suffix:
  *                          trailing slash → sub-directory listing
  *                          .md            → raw markdown
+ *                          .html          → raw HTML
  *                          otherwise      → 404
  *
  * Fastify rejects duplicate method+path registrations, so the bare
@@ -37,15 +38,26 @@ export function registerApiRoutes(
           return sendListing(reply, source, captured.replace(/\/+$/, ""));
         }
 
-        if (!captured.endsWith(".md")) {
-          return reply.status(404).send({ error: "Only .md files are served" });
+        const contentType = captured.endsWith(".md")
+          ? "text/markdown; charset=utf-8"
+          : captured.endsWith(".html")
+            ? "text/html; charset=utf-8"
+            : undefined;
+
+        if (contentType === undefined) {
+          return reply
+            .status(404)
+            .send({ error: "Only .md and .html files are served" });
         }
 
         try {
-          const content = await readMarkdown(source.root, captured);
-          return reply
-            .header("Content-Type", "text/markdown; charset=utf-8")
-            .send(content);
+          const content = await readSourceFile(source.root, captured);
+          // Hosted HTML carries its own inline scripts/styles that cannot
+          // be nonce-tagged, so the strict CSP is dropped for raw HTML.
+          if (captured.endsWith(".html")) {
+            void reply.removeHeader("Content-Security-Policy");
+          }
+          return reply.header("Content-Type", contentType).send(content);
         } catch (error: unknown) {
           return sendFsError(reply, error, captured);
         }
