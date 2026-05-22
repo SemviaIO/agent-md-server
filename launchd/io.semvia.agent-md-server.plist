@@ -4,6 +4,12 @@
   Template: copy to ~/Library/LaunchAgents/ and replace __HOME__ with your home directory.
   Or run: sed "s|__HOME__|$HOME|g" launchd/io.semvia.agent-md-server.plist > ~/Library/LaunchAgents/io.semvia.agent-md-server.plist
   Then: launchctl load ~/Library/LaunchAgents/io.semvia.agent-md-server.plist
+
+  ProgramArguments runs launchd/run.sh, which resolves the real Volta-pinned
+  Node binary and exec-replaces itself with it. This keeps launchd's tracked
+  PID identical to the process holding port 3333 — running ~/.volta/bin/node
+  directly forks the real Node as a child and strands an orphan on restart
+  (issue #24). Regenerate and reload this LaunchAgent once to pick up the fix.
 -->
 <plist version="1.0">
 <dict>
@@ -11,8 +17,7 @@
     <string>io.semvia.agent-md-server</string>
     <key>ProgramArguments</key>
     <array>
-        <string>__HOME__/.volta/bin/node</string>
-        <string>__HOME__/projects/SemviaIO/agent-md-server/dist/main.js</string>
+        <string>__HOME__/projects/SemviaIO/agent-md-server/launchd/run.sh</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
