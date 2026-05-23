@@ -145,6 +145,7 @@ export function createApp(config: Config): FastifyInstance {
           titleName,
           request.nonce,
           parentUrlOf(urlPrefix, captured),
+          `/api${urlPrefix}/${captured}.md`,
         );
       },
     );

@@ -2,6 +2,7 @@ export function renderShell(
   title: string,
   nonce: string,
   parentUrl: string,
+  rawUrl: string,
 ): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -35,14 +36,18 @@ export function renderShell(
       padding: 2rem 1.5rem;
     }
 
-    .back-link {
-      display: inline-block;
-      color: #58a6ff;
-      text-decoration: none;
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
       margin-bottom: 1rem;
       font-size: 0.875rem;
     }
-    .back-link:hover { text-decoration: underline; }
+    .top-bar a {
+      color: #58a6ff;
+      text-decoration: none;
+    }
+    .top-bar a:hover { text-decoration: underline; }
 
     .page-title {
       font-size: 1.75rem;
@@ -76,7 +81,10 @@ export function renderShell(
 <body>
   <div class="status-banner" id="status"></div>
   <div class="container">
-    <a class="back-link" href="${escapeHtml(parentUrl)}">&larr; Back</a>
+    <div class="top-bar">
+      <a href="${escapeHtml(parentUrl)}">&larr; Back</a>
+      <a href="${escapeHtml(rawUrl)}">View raw</a>
+    </div>
     <h1 class="page-title">${escapeHtml(title)}</h1>
     <div class="markdown-body" id="content">
       <p style="color:#8b949e;">Loading&hellip;</p>
