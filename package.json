@@ -14,7 +14,8 @@
     "start:tailscale": "node dist/main.js --tailscale",
     "typecheck": "tsc --noEmit",
     "preflight": "pnpm typecheck && pnpm build",
-    "stress": "tsx scripts/stress-renderer.ts"
+    "stress": "tsx scripts/stress-renderer.ts",
+    "postinstall": "playwright install chromium"
   },
   "keywords": [
     "mermaid",
