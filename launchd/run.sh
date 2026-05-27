@@ -8,7 +8,24 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NODE_BIN="$("$HOME/.volta/bin/volta" which node)"
+
+# Locate the `volta` driver. The canonical installer drops it in
+# ~/.volta/bin/; Homebrew installs it under /opt/homebrew/bin (Apple Silicon)
+# or /usr/local/bin (Intel). launchd's default PATH excludes both Homebrew
+# prefixes, so probe known locations explicitly instead of relying on PATH.
+VOLTA_BIN=""
+for candidate in "$HOME/.volta/bin/volta" /opt/homebrew/bin/volta /usr/local/bin/volta; do
+  if [[ -x "$candidate" ]]; then
+    VOLTA_BIN="$candidate"
+    break
+  fi
+done
+if [[ -z "$VOLTA_BIN" ]]; then
+  echo "run.sh: volta not found in ~/.volta/bin, /opt/homebrew/bin, or /usr/local/bin" >&2
+  exit 1
+fi
+
+NODE_BIN="$("$VOLTA_BIN" which node)"
 
 # `set -e` catches a non-zero `volta` exit; this guards the exit-0-bad-output
 # case so a clear message lands in /tmp/agent-md-server.log instead of an
