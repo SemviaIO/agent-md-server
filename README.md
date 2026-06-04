@@ -112,11 +112,22 @@ If any block has syntax errors, the response includes per-block errors so the ag
 
 ## Tailscale
 
-The `--tailscale` flag runs `tailscale serve --bg` to expose the server on your tailnet over HTTPS.
+With `--tailscale` (or `"tailscale": true` in the config file), on startup the server
+runs `tailscale serve --bg --https=443 http://127.0.0.1:<port>` to expose itself on your
+tailnet over HTTPS, and advertises the resulting `https://<host>/` URL via the MCP tools.
 This lets you view rendered documents from any device on your Tailscale network.
 
-The serve rule is cleaned up automatically when the server exits (via SIGINT or SIGTERM).
-If the `tailscale` command is not found, the server continues without it and prints a warning.
+The serve rule is (re)established on every startup. `tailscale serve` persists its rule in
+tailscaled, but reboots, Tailscale app updates, and `tailscale serve reset` can wipe it —
+re-running on startup keeps the exposure self-healing, so the advertised URL never points
+at a dead listener. The rule is intentionally left in place on exit so the long-running
+(launchd) deployment stays reachable across restarts.
+
+The `tailscale` CLI is located by probing known install paths (Homebrew, `/usr/local/bin`,
+the Tailscale.app bundle), since launchd's PATH does not include them. If it cannot be found
+or the command fails (for example, no GUI/XPC session is available), the server continues
+without it and prints a warning; the advertised URL then works only if a serve rule was
+configured out of band.
 
 ## URL scheme
 
