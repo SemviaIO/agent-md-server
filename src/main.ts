@@ -1,5 +1,8 @@
+import { execFile } from "node:child_process";
 import dns from "node:dns";
+import { existsSync } from "node:fs";
 import os from "node:os";
+import { promisify } from "node:util";
 
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
@@ -7,6 +10,19 @@ import { loadConfig } from "./config.js";
 import { createMcpServer } from "./mcp.js";
 import { Renderer } from "./renderer.js";
 import { createApp } from "./server.js";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * launchd's PATH is bare (/usr/bin:/bin:/usr/sbin:/sbin), so the `tailscale`
+ * CLI is not discoverable by name. Probe known install locations, mirroring
+ * how run.sh probes for volta.
+ */
+const TAILSCALE_BIN_CANDIDATES = [
+  "/opt/homebrew/bin/tailscale",
+  "/usr/local/bin/tailscale",
+  "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+];
 
 async function main() {
   const config = await loadConfig();
@@ -74,7 +90,7 @@ async function main() {
   }
 
   if (config.tailscale) {
-    config.tailscaleUrl = await setupTailscale();
+    config.tailscaleUrl = await setupTailscale(config.port);
     if (config.tailscaleUrl) {
       console.log(`Tailscale: ${config.tailscaleUrl}`);
     }
@@ -86,7 +102,7 @@ async function main() {
   console.log("Playwright renderer ready");
 }
 
-async function setupTailscale(): Promise<string | undefined> {
+async function setupTailscale(port: number): Promise<string | undefined> {
   try {
     // Find the Tailscale IP from network interfaces (CGNAT range 100.64.0.0/10)
     const tailscaleIp = findTailscaleIp();
@@ -95,19 +111,50 @@ async function setupTailscale(): Promise<string | undefined> {
       return undefined;
     }
 
-    // Reverse DNS lookup via Tailscale's MagicDNS to get the hostname.
-    // This avoids the `tailscale` CLI which requires GUI/XPC and fails under launchd.
+    // Reverse DNS lookup via Tailscale's MagicDNS to get the hostname. This
+    // derives the URL without `tailscale status`, which can need GUI/XPC under
+    // launchd.
     const resolver = new dns.promises.Resolver();
     resolver.setServers(["100.100.100.100"]);
     const hostnames = await resolver.reverse(tailscaleIp);
     const dnsName = hostnames[0]?.replace(/\.$/, "");
-    if (dnsName) {
-      return `https://${dnsName}/`;
+    if (!dnsName) {
+      return undefined;
     }
+
+    // (Re)establish the tailnet HTTPS proxy on every startup. `tailscale serve`
+    // persists its rule in tailscaled, but reboots / app updates / `serve reset`
+    // can wipe it -- re-running here keeps the exposure self-healing so the
+    // advertised URL never points at a dead listener.
+    await ensureServeProxy(port);
+
+    return `https://${dnsName}/`;
   } catch (error: unknown) {
     console.warn("Warning: Tailscale setup failed:", String(error));
   }
   return undefined;
+}
+
+/**
+ * Runs `tailscale serve --bg` to proxy the tailnet HTTPS endpoint (:443) to the
+ * local server. Best-effort: if the CLI is missing or fails (e.g. no GUI/XPC
+ * session under launchd), the server still serves locally and advertises the
+ * URL, which keeps working as long as a serve rule was configured out of band.
+ */
+async function ensureServeProxy(port: number): Promise<void> {
+  const bin = TAILSCALE_BIN_CANDIDATES.find((candidate) => existsSync(candidate));
+  if (!bin) {
+    console.warn(
+      "Warning: tailscale CLI not found; skipping `tailscale serve`. The advertised URL only works if a serve rule is configured manually.",
+    );
+    return;
+  }
+  try {
+    await execFileAsync(bin, ["serve", "--bg", "--https=443", `http://127.0.0.1:${port}`]);
+    console.log(`Tailscale serve: tailnet :443 → http://127.0.0.1:${port}`);
+  } catch (error: unknown) {
+    console.warn("Warning: `tailscale serve` failed:", String(error));
+  }
 }
 
 function findTailscaleIp(): string | undefined {
