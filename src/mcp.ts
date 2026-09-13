@@ -170,6 +170,11 @@ export function createMcpServer(
         // on the strength of the jail check above having proved the file
         // exists.
         if (isMarkdown) {
+          // Resolved lexically, not taken from `resolveSafePath`'s return:
+          // that value is realpathed, and a source root reached through a
+          // symlink (macOS `/var` -> `/private/var`) then names a path other
+          // than the one configured. The renderer keys its mtime cache on
+          // this string, so it stays in the configured root's vocabulary.
           const safePath = path.resolve(match.source.root, match.relative);
           const result = await renderer.render(match.source.prefix, viewName, safePath);
 

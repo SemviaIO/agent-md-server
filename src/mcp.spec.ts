@@ -188,9 +188,14 @@ describe("mcp get_url", () => {
     // The complement of the dotted-name case: containment is checked on the
     // resolved path, so a genuine traversal is caught even though nothing
     // screens the relative form for a `..` substring.
+    //
+    // Concatenated rather than built with `path.join`, which normalises
+    // eagerly: it would collapse the climb here in the test and hand the tool
+    // a plain out-of-source path, leaving the tool's own resolve — the thing
+    // this pins — unexercised.
     const result = await client.callTool({
       name: "get_url",
-      arguments: { path: path.join(sourceRoot, "a..b", "..", "..", "escaped.md") },
+      arguments: { path: `${sourceRoot}/a..b/../../escaped.md` },
     });
 
     expect(result.isError).toBe(true);
