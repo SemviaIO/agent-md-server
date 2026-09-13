@@ -13,7 +13,8 @@
     "start": "node dist/main.js",
     "start:tailscale": "node dist/main.js --tailscale",
     "typecheck": "tsc --noEmit",
-    "preflight": "pnpm typecheck && pnpm build",
+    "test": "vitest run",
+    "preflight": "pnpm typecheck && pnpm test && pnpm build && ./scripts/stamp-preflight.sh",
     "stress": "tsx scripts/stress-renderer.ts",
     "postinstall": "playwright install chromium"
   },
@@ -39,7 +40,8 @@
     "@types/node": "^22.0.0",
     "tsup": "^8.5.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vitest": "^5.0.0"
   },
   "packageManager": "pnpm@10.33.0",
   "pnpm": {

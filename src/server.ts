@@ -113,7 +113,10 @@ export function createApp(config: Config): FastifyInstance {
           try {
             const content = await readSourceFile(source.root, captured);
             void reply.removeHeader("Content-Security-Policy");
-            void reply.type("text/html");
+            // Charset is explicit: hosted HTML is arbitrary author content
+            // that may not declare its own <meta charset>, and without it
+            // UTF-8 bytes render as mojibake (#38). Matches the API route.
+            void reply.type("text/html; charset=utf-8");
             return content;
           } catch (error: unknown) {
             return sendFsError(reply, error, captured);

@@ -164,11 +164,25 @@ The HTML views use these APIs internally -- the browser fetches markdown via `/a
 ## Development
 
 ```bash
-pnpm dev    # Run with tsx (hot reload)
-pnpm build  # Build for production
+pnpm dev        # Run with tsx (hot reload)
+pnpm test       # Run the vitest suite
+pnpm build      # Build for production
+pnpm preflight  # typecheck + test + build — the gate before pushing
 ```
 
 Requires Node.js >= 22.
+
+On success `preflight` stamps `.preflight-ok` with the validated commit
+(gitignored), which the `/ship` push guard reads before allowing a push. The
+gates run against the working tree, so the stamp is only written when that tree
+is clean — otherwise the sentinel would name a commit whose content was never
+what passed. A dirty tree still runs the gates and still reports their result;
+it just doesn't earn a stamp.
+
+Tests live beside the code they cover as `src/*.spec.ts` and run in-process:
+the MCP suite drives the real tool handlers over
+`InMemoryTransport.createLinkedPair()`, and the HTTP suite uses Fastify's
+`inject()`. No browser is launched, so the suite stays fast.
 
 ### Git hooks
 
