@@ -7,7 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type { Config, SourceConfig } from "./types.js";
-import { listFiles, resolveSafePath } from "./fs.js";
+import { isServedFile, listFiles, resolveSafePath } from "./fs.js";
 import type { Renderer } from "./renderer.js";
 
 /**
@@ -32,7 +32,17 @@ function resolvePathToSource(
   return undefined;
 }
 
-export function createMcpServer(config: Config, renderer: Renderer): Server {
+/**
+ * The MCP layer only ever calls `render`, so it depends on that slice rather
+ * than the concrete class. Tests substitute a stub to prove the `.html`
+ * branch never reaches Playwright.
+ */
+export type ValidatingRenderer = Pick<Renderer, "render">;
+
+export function createMcpServer(
+  config: Config,
+  renderer: ValidatingRenderer,
+): Server {
   const server = new Server(
     { name: "agent-md-server", version: "0.1.0" },
     { capabilities: { tools: {} } },
@@ -68,13 +78,13 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
       {
         name: "get_url",
         description:
-          `Validates a markdown file's Mermaid diagrams and returns its viewer URL. Returns an error with details if validation fails — fix the file and call again to get the URL. Configured directories: ${sourceListDescription()}. Viewer: ${viewerUrl()}`,
+          `Returns the viewer URL for a hosted .md or .html file. Markdown is rendered first and its Mermaid diagrams validated — on failure you get an error with details instead of a URL, so fix the file and call again. HTML is served as-is and returns immediately. Configured directories: ${sourceListDescription()}. Viewer: ${viewerUrl()}`,
         inputSchema: {
           type: "object" as const,
           properties: {
             path: {
               type: "string",
-              description: "Absolute filesystem path to a .md file",
+              description: "Absolute filesystem path to a .md or .html file",
             },
           },
           required: ["path"],
@@ -87,7 +97,7 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
       {
         name: "list_paths",
         description:
-          "Lists all markdown files currently hosted by the server, as absolute filesystem paths grouped by directory.",
+          "Lists all files currently hosted by the server (.md and .html), as absolute filesystem paths grouped by directory.",
         inputSchema: {
           type: "object" as const,
           properties: {},
@@ -116,6 +126,18 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
         const match = resolvePathToSource(config.sources, filePath);
         if (!match) return pathNotInSourceError();
 
+        // Extension shape is an argument error, so it is answered before any
+        // filesystem work — otherwise a nonexistent `.txt` would come back as
+        // ENOENT, implying that creating the file would make the call work.
+        // Wording matches the API route's 404 so both layers speak with one
+        // voice.
+        if (!isServedFile(match.relative)) {
+          return {
+            content: [{ type: "text", text: "Only .md and .html files are served" }],
+            isError: true,
+          };
+        }
+
         // Validate the file exists and isn't a symlink escape
         try {
           await resolveSafePath(match.source.root, match.relative);
@@ -126,9 +148,25 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
           };
         }
 
-        const viewName = match.relative.endsWith(".md")
+        const isMarkdown = match.relative.endsWith(".md");
+
+        // `.md` is viewed at its extensionless URL; `.html` is served raw at
+        // its own name.
+        const viewName = isMarkdown
           ? match.relative.slice(0, -3)
           : match.relative;
+        const url = `${viewerUrl()}/${match.source.prefix}/${viewName}`;
+
+        // Hosted HTML is served as-is, with no viewer shell and so no
+        // `[data-render-status]` sentinel for the renderer to wait on, and no
+        // Mermaid to validate. Routing it through Playwright is what made
+        // get_url time out (#37), so the URL is returned straight from the
+        // jail check above, which already proved the file exists.
+        if (!isMarkdown) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ status: "ok", url }) }],
+          };
+        }
 
         // Render and validate via Playwright
         const safePath = path.resolve(match.source.root, match.relative);
@@ -144,7 +182,6 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
           };
         }
 
-        const url = `${viewerUrl()}/${match.source.prefix}/${viewName}`;
         return {
           content: [{ type: "text", text: JSON.stringify({ status: "ok", url }) }],
         };
@@ -154,8 +191,8 @@ export function createMcpServer(config: Config, renderer: Renderer): Server {
         const sections: string[] = [];
         for (const source of visibleSources) {
           // listFiles now returns dir entries too; this tool's contract
-          // is "all markdown files… as absolute paths", so filter to
-          // files only. Recursing into subdirectories is a follow-up.
+          // is "all hosted files… as absolute paths", so filter to files
+          // only. Recursing into subdirectories is a follow-up.
           const entries = await listFiles(source.root);
           const dir = path.resolve(source.root);
           const paths = entries

@@ -164,11 +164,22 @@ The HTML views use these APIs internally -- the browser fetches markdown via `/a
 ## Development
 
 ```bash
-pnpm dev    # Run with tsx (hot reload)
-pnpm build  # Build for production
+pnpm dev        # Run with tsx (hot reload)
+pnpm test       # Run the vitest suite
+pnpm build      # Build for production
+pnpm preflight  # typecheck + test + build — the gate before pushing
 ```
 
 Requires Node.js >= 22.
+
+`preflight` stamps `.preflight-ok` with the commit it validated (gitignored).
+The `/ship` push guard reads that sentinel, so a push is only allowed once
+preflight has passed on the exact HEAD being pushed.
+
+Tests live beside the code they cover as `src/*.spec.ts` and run in-process:
+the MCP suite drives the real tool handlers over
+`InMemoryTransport.createLinkedPair()`, and the HTTP suite uses Fastify's
+`inject()`. No browser is launched, so the suite stays fast.
 
 ### Git hooks
 
