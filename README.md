@@ -172,9 +172,12 @@ pnpm preflight  # typecheck + test + build — the gate before pushing
 
 Requires Node.js >= 22.
 
-`preflight` stamps `.preflight-ok` with the commit it validated (gitignored).
-The `/ship` push guard reads that sentinel, so a push is only allowed once
-preflight has passed on the exact HEAD being pushed.
+On success `preflight` stamps `.preflight-ok` with the validated commit
+(gitignored), which the `/ship` push guard reads before allowing a push. The
+gates run against the working tree, so the stamp is only written when that tree
+is clean — otherwise the sentinel would name a commit whose content was never
+what passed. A dirty tree still runs the gates and still reports their result;
+it just doesn't earn a stamp.
 
 Tests live beside the code they cover as `src/*.spec.ts` and run in-process:
 the MCP suite drives the real tool handlers over

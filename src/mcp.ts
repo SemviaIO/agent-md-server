@@ -15,6 +15,13 @@ import type { Renderer } from "./renderer.js";
  * Returns the matching source and the relative path within it, or undefined
  * if the path doesn't fall within any source directory. Hidden sources are
  * included — `hidden` only controls discovery surfaces, not resolution.
+ *
+ * Containment rests entirely on the `startsWith` check against the *resolved*
+ * path: `path.resolve` has already collapsed every `..` segment, so a real
+ * traversal lands outside `sourceDir` and fails it. Screening the relative
+ * form for a `..` substring on top of that only ever rejects literal dots in
+ * a name (`draft..md`, `a..b/notes.md`) that are provably contained.
+ * `resolveSafePath` remains the security boundary, re-checking after realpath.
  */
 function resolvePathToSource(
   sources: SourceConfig[],
@@ -24,9 +31,7 @@ function resolvePathToSource(
   for (const source of sources) {
     const sourceDir = path.resolve(source.root);
     if (resolved.startsWith(sourceDir + path.sep)) {
-      const relative = path.relative(sourceDir, resolved);
-      if (relative.includes("..")) return undefined;
-      return { source, relative };
+      return { source, relative: path.relative(sourceDir, resolved) };
     }
   }
   return undefined;
@@ -157,31 +162,29 @@ export function createMcpServer(
           : match.relative;
         const url = `${viewerUrl()}/${match.source.prefix}/${viewName}`;
 
-        // Hosted HTML is served as-is, with no viewer shell and so no
-        // `[data-render-status]` sentinel for the renderer to wait on, and no
-        // Mermaid to validate. Routing it through Playwright is what made
-        // get_url time out (#37), so the URL is returned straight from the
-        // jail check above, which already proved the file exists.
-        if (!isMarkdown) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({ status: "ok", url }) }],
-          };
+        // Only markdown is rendered and validated. Hosted HTML is served
+        // as-is, with no viewer shell and so no `[data-render-status]`
+        // sentinel for the renderer to wait on, and no Mermaid to validate —
+        // routing it through Playwright is what made get_url time out (#37).
+        // Its URL falls straight through to the shared success return below,
+        // on the strength of the jail check above having proved the file
+        // exists.
+        if (isMarkdown) {
+          const safePath = path.resolve(match.source.root, match.relative);
+          const result = await renderer.render(match.source.prefix, viewName, safePath);
+
+          if (result.status === "error") {
+            const errorList = result.errors
+              .map((e, i) => `  ${i + 1}. ${e}`)
+              .join("\n");
+            return {
+              content: [{ type: "text", text: `Mermaid rendering errors — fix and call get_url again:\n${errorList}` }],
+              isError: true,
+            };
+          }
         }
 
-        // Render and validate via Playwright
-        const safePath = path.resolve(match.source.root, match.relative);
-        const result = await renderer.render(match.source.prefix, viewName, safePath);
-
-        if (result.status === "error") {
-          const errorList = result.errors
-            .map((e, i) => `  ${i + 1}. ${e}`)
-            .join("\n");
-          return {
-            content: [{ type: "text", text: `Mermaid rendering errors — fix and call get_url again:\n${errorList}` }],
-            isError: true,
-          };
-        }
-
+        // One success shape for both formats, so callers parse one thing.
         return {
           content: [{ type: "text", text: JSON.stringify({ status: "ok", url }) }],
         };

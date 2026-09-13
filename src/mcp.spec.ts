@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -51,9 +51,11 @@ describe("mcp get_url", () => {
     sourceRoot = await mkdtemp(path.join(os.tmpdir(), "agent-md-server-mcp-"));
     await writeFile(path.join(sourceRoot, "doc.md"), "# hi\n");
     await writeFile(path.join(sourceRoot, "page.html"), "<h1>hi</h1>\n");
-    // Exists on disk so the rejection is provably about the extension and
-    // not a missing-file error wearing the same clothes.
     await writeFile(path.join(sourceRoot, "notes.txt"), "hi\n");
+    // Literal dots in a directory name — contained, but a naive `..`
+    // substring screen would reject it.
+    await mkdir(path.join(sourceRoot, "a..b"));
+    await writeFile(path.join(sourceRoot, "a..b", "notes.md"), "# hi\n");
 
     config = {
       sources: [{ prefix: "plans", root: sourceRoot }],
@@ -140,6 +142,37 @@ describe("mcp get_url", () => {
     expect(renderer.calls).toEqual([]);
   });
 
+  it("blames the extension, not the missing file, for an absent .txt", async () => {
+    // Pins extension-before-jail ordering. The existing-`.txt` case above
+    // passes under either ordering; only a path that is *both* unsupported
+    // and absent distinguishes them, and jail-first would answer ENOENT —
+    // implying that creating the file would make the call work.
+    const result = await client.callTool({
+      name: "get_url",
+      arguments: { path: path.join(sourceRoot, "no-such.txt") },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toBe("Only .md and .html files are served");
+    expect(renderer.calls).toEqual([]);
+  });
+
+  it("resolves a file whose path contains literal dots in a name", async () => {
+    // `path.resolve` has already collapsed real traversals by the time
+    // containment is checked, so `a..b/` is a plain directory — it must not
+    // be mistaken for an escape attempt.
+    const result = await client.callTool({
+      name: "get_url",
+      arguments: { path: path.join(sourceRoot, "a..b", "notes.md") },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(textOf(result))).toEqual({
+      status: "ok",
+      url: "http://127.0.0.1:3333/plans/a..b/notes",
+    });
+  });
+
   it("reports a missing file rather than handing back a URL", async () => {
     const result = await client.callTool({
       name: "get_url",
@@ -148,6 +181,20 @@ describe("mcp get_url", () => {
 
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain("ENOENT");
+    expect(renderer.calls).toEqual([]);
+  });
+
+  it("rejects `..` segments that climb out of the source", async () => {
+    // The complement of the dotted-name case: containment is checked on the
+    // resolved path, so a genuine traversal is caught even though nothing
+    // screens the relative form for a `..` substring.
+    const result = await client.callTool({
+      name: "get_url",
+      arguments: { path: path.join(sourceRoot, "a..b", "..", "..", "escaped.md") },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("not within any configured source");
     expect(renderer.calls).toEqual([]);
   });
 
