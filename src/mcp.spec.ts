@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { CLAUDE_SESSIONS_ROOT } from "./config.js";
+import { CLAUDE_SESSIONS_ROOT, withBuiltinSources } from "./config.js";
 import { createMcpServer, type ValidatingRenderer } from "./mcp.js";
 import type { RenderResult } from "./renderer.js";
 import type { Config } from "./types.js";
@@ -42,6 +42,18 @@ function textOf(result: Record<string, unknown>): string {
   return first.text;
 }
 
+async function connect(config: Config, renderer: StubRenderer): Promise<Client> {
+  const server = createMcpServer(config, renderer);
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "spec", version: "0.0.0" });
+  await Promise.all([
+    client.connect(clientTransport),
+    server.connect(serverTransport),
+  ]);
+  return client;
+}
+
 describe("mcp preview", () => {
   let sourceRoot: string;
   let renderer: StubRenderer;
@@ -72,14 +84,7 @@ describe("mcp preview", () => {
 
   beforeEach(async () => {
     renderer = new StubRenderer();
-    const server = createMcpServer(config, renderer);
-    const [clientTransport, serverTransport] =
-      InMemoryTransport.createLinkedPair();
-    client = new Client({ name: "spec", version: "0.0.0" });
-    await Promise.all([
-      client.connect(clientTransport),
-      server.connect(serverTransport),
-    ]);
+    client = await connect(config, renderer);
   });
 
   it("returns a URL for a hosted .html file without invoking the renderer", async () => {
@@ -243,6 +248,15 @@ describe("mcp preview", () => {
     expect(instructions).toContain("HTML");
     expect(instructions).toContain("Artifact");
     expect(instructions).toContain("`preview`");
-    expect(instructions).toContain(CLAUDE_SESSIONS_ROOT);
+    expect(instructions).not.toContain(CLAUDE_SESSIONS_ROOT);
+  });
+
+  it("points agents at the session tree only when it is served", async () => {
+    const withSessions = await connect(
+      { ...config, sources: withBuiltinSources(config.sources) },
+      renderer,
+    );
+
+    expect(withSessions.getInstructions()).toContain(CLAUDE_SESSIONS_ROOT);
   });
 });

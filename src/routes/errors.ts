@@ -11,13 +11,18 @@ import type { FastifyReply } from "fastify";
  *                              leak internals)
  *   anything else      → 500
  */
+/** True for the ENOENT that a missing file raises. */
+export function isNotFound(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
 export function sendFsError(
   reply: FastifyReply,
   error: unknown,
   target: string,
 ) {
   if (error instanceof Error) {
-    if ("code" in error && error.code === "ENOENT") {
+    if (isNotFound(error)) {
       return reply.status(404).send({ error: `"${target}" not found` });
     }
     if ("code" in error && error.code === "ENOTDIR") {

@@ -55,7 +55,7 @@ Each source is an object with a URL `prefix` and a filesystem `root`, matching `
 
 - `prefix` — one or more `[a-z0-9-]` segments joined by `/`. Each segment becomes a URL path segment — e.g. `claude/plans` is served at `/claude/plans/`.
 - `root` — filesystem directory. Supports `~` expansion to the home directory. Created automatically if it does not exist.
-- `hidden` — optional boolean (default `false`). When `true`, the source is served normally but omitted from MCP tool descriptions, `list_paths`, and the browser root index. Use for fallback directories you want available by absolute-path lookup without advertising them.
+- `hidden` — optional boolean (default `false`). When `true`, the source is served normally but omitted from MCP tool descriptions, `list_paths`, and the browser root index (the built-in `claude-sessions` source is still named in the MCP text). Use for fallback directories you want available by absolute-path lookup without advertising them.
 
 Two sources cannot have overlapping prefixes (e.g. `plans` and `plans/foo` would collide) — the server exits at boot with a clear error if this happens.
 
@@ -112,7 +112,7 @@ The server also sends MCP `instructions` describing it as a local preview host f
 | `preview` | `path`: absolute path to a `.md` or `.html` file under a source | `{"status": "ok", "url": "..."}`. For `.md`, Mermaid diagrams are validated first; a parse failure returns the errors instead of a URL. `.html` returns immediately. |
 | `list_paths` | none | The `.md` and `.html` files at the top level of each visible source, as absolute paths grouped by directory. |
 
-Both tools are read-only. Hidden sources resolve through `preview` but are left out of `list_paths` and the tool descriptions.
+Both tools are read-only. Hidden sources resolve through `preview` but are left out of `list_paths` and the tool descriptions, except the built-in `claude-sessions` root, which the instructions and the `preview` description name so agents know their scratchpad is previewable.
 
 ### Previewing Claude Code Artifact pages
 
@@ -160,7 +160,7 @@ configured out of band.
 
 `:source` may itself be a multi-segment prefix (e.g. `claude/plans`), in which case the URLs include each segment — `/claude/plans/foo`, `/api/claude/plans/foo.md`, etc.
 
-Sub-paths under a source are resolved lazily: each listing request reads exactly the directory it lists, with no upfront scan. Listings include `.md` files, `.html` files, and subdirectories (entries carry a `kind: "file" | "dir"` field). Sibling assets are served by URL but never listed. `.html` pages are rendered natively by the browser, without the markdown viewer shell. The viewer route wraps a page at response time, never on disk: a page without a doctype gets a minimal standards-mode skeleton, and every page gets an inline script that reloads it from `/events/`. Because hosted HTML carries its own inline scripts and styles, the strict nonce-based Content-Security-Policy is dropped for HTML and asset responses. The following directory names are silently omitted from listings as a noise filter, so a source can safely point at a dev tree like `~/projects`:
+Sub-paths under a source are resolved lazily: each listing request reads exactly the directory it lists, with no upfront scan. Listings include `.md` files, `.html` files, and subdirectories (entries carry a `kind: "file" | "dir"` field). Sibling assets are served by URL but never listed. `.html` pages are rendered natively by the browser, without the markdown viewer shell. The viewer route wraps a page at response time, never on disk: a page without a doctype gets a minimal standards-mode skeleton, and every page gets an inline script that reloads it from `/events/`. Because hosted HTML carries its own inline scripts and styles, the strict nonce-based Content-Security-Policy is dropped for HTML responses. Asset responses keep it, plus `X-Content-Type-Options: nosniff`. A request for a missing asset-shaped name that is the clean URL of a markdown file (`schema.json` for `schema.json.md`) gets the viewer. Page live reload ignores changes inside the denylisted directories below. The following directory names are silently omitted from listings as a noise filter, so a source can safely point at a dev tree like `~/projects`:
 
 ```
 node_modules, .git, dist, build, target, .next, .venv, __pycache__

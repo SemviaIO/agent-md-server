@@ -11,9 +11,9 @@ import {
   readSourceFile,
   resolveSafePath,
 } from "./fs.js";
+import { isNotFound, sendFsError } from "./routes/errors.js";
 import { registerApiRoutes } from "./routes/api.js";
 import { registerWatchRoutes } from "./routes/watch.js";
-import { sendFsError } from "./routes/errors.js";
 import { hostHtml } from "./templates/html-host.js";
 import { renderShell } from "./templates/shell.js";
 import { renderListingPage } from "./templates/listing-page.js";
@@ -28,6 +28,15 @@ function parentUrlOf(urlPrefix: string, subPath: string): string {
   return parent === "." || parent === "/" || parent === ""
     ? `${urlPrefix}/`
     : `${urlPrefix}/${parent}/`;
+}
+
+/** True when `filename` is a markdown file inside the jail. */
+async function isMarkdown(root: string, filename: string): Promise<boolean> {
+  try {
+    return (await stat(await resolveSafePath(root, filename))).isFile();
+  } catch {
+    return false;
+  }
 }
 
 declare module "fastify" {
@@ -133,15 +142,24 @@ export function createApp(config: Config): FastifyInstance {
 
         // Sibling asset (CSS, JS, images, fonts, JSON) referenced by a
         // hosted page → raw bytes under the same jail as every other read.
+        // The strict CSP stays: it does not reach the page that loads the
+        // asset, and it stops an SVG opened directly from running script.
+        // A missing asset whose name is the clean URL of a markdown file
+        // (`schema.json` for `schema.json.md`) falls through to the viewer.
         const assetType = assetContentType(captured);
         if (assetType !== undefined) {
           try {
             const bytes = await readSourceBytes(source.root, captured);
-            void reply.removeHeader("Content-Security-Policy");
+            void reply.header("X-Content-Type-Options", "nosniff");
             void reply.type(assetType);
             return bytes;
           } catch (error: unknown) {
-            return sendFsError(reply, error, captured);
+            if (
+              !isNotFound(error) ||
+              !(await isMarkdown(source.root, `${captured}.md`))
+            ) {
+              return sendFsError(reply, error, captured);
+            }
           }
         }
 

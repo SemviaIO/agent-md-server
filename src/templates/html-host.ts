@@ -6,8 +6,10 @@
 /**
  * A page "has a doctype" when, after an optional BOM, whitespace and
  * comments, its first token is `<!doctype`. Anything else is a fragment.
+ * A comment body cannot cross `-->`, so each leading comment matches one
+ * way only and a fragment of many comments fails in linear time.
  */
-const DOCTYPE = /^﻿?(?:\s|<!--[\s\S]*?-->)*<!doctype/i;
+const DOCTYPE = /^\uFEFF?(?:\s|<!--(?:(?!-->)[\s\S])*-->)*<!doctype/i;
 
 /**
  * What claude.ai wraps a fragment Artifact page in at publish time. No
@@ -32,6 +34,6 @@ export const RELOAD_SCRIPT =
 export function hostHtml(content: string): string {
   const page = DOCTYPE.test(content)
     ? content
-    : SKELETON + content.replace(/^﻿/, "");
+    : SKELETON + content.replace(/^\uFEFF/, "");
   return page + RELOAD_SCRIPT;
 }

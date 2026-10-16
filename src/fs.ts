@@ -179,27 +179,45 @@ export async function readSourceBytes(
   return readFile(safePath);
 }
 
+/**
+ * Watch one file. `onError` runs once if the watcher fails after it starts
+ * (the file's directory is deleted, the OS runs out of watches); the
+ * watcher is already closed by then. A failure to start throws instead.
+ */
 export function watchFile(
   sourceDir: string,
   filename: string,
   onChange: () => void,
+  onError: () => void,
 ): () => void {
-  return watchDebounced(lexicalJail(sourceDir, filename), false, onChange);
+  return watchDebounced(lexicalJail(sourceDir, filename), {
+    recursive: false,
+    onChange,
+    onError,
+  });
 }
 
 /**
  * Watch the directory holding a hosted page, recursively, so an edit to the
  * page or to any asset beside or below it (e.g. `assets/style.css`) fires.
- * The same caller contract as `watchFile` applies: validate `filename`
- * through `resolveSafePath` first.
+ * Changes inside `IGNORED_DIRS` are skipped, so git or a build in a page's
+ * repo does not reload it. The same caller contract as `watchFile`
+ * applies: validate `filename` through `resolveSafePath` first.
  */
 export function watchPageDirectory(
   sourceDir: string,
   filename: string,
   onChange: () => void,
+  onError: () => void,
 ): () => void {
   const page = lexicalJail(sourceDir, filename);
-  return watchDebounced(path.dirname(page), true, onChange);
+  return watchDebounced(path.dirname(page), {
+    recursive: true,
+    onChange,
+    onError,
+    ignore: (changed) =>
+      changed.split(path.sep).some((segment) => IGNORED_DIRS.has(segment)),
+  });
 }
 
 /**
@@ -223,22 +241,37 @@ function lexicalJail(sourceDir: string, filename: string): string {
 
 function watchDebounced(
   target: string,
-  recursive: boolean,
-  onChange: () => void,
+  options: {
+    recursive: boolean;
+    onChange: () => void;
+    onError: () => void;
+    /** Skip a change by its path relative to `target`. */
+    ignore?: (changed: string) => boolean;
+  },
 ): () => void {
+  const { recursive, onChange, onError, ignore } = options;
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const watcher: FSWatcher = watch(target, { recursive }, (_event) => {
+  const watcher: FSWatcher = watch(target, { recursive }, (_event, changed) => {
+    if (changed !== null && ignore?.(changed)) return;
     if (debounceTimer !== undefined) {
       clearTimeout(debounceTimer);
     }
     debounceTimer = setTimeout(onChange, 100);
   });
 
-  return () => {
+  const close = () => {
     if (debounceTimer !== undefined) {
       clearTimeout(debounceTimer);
     }
     watcher.close();
   };
+
+  // Without a listener an `error` event is thrown and takes the server down.
+  watcher.on("error", () => {
+    close();
+    onError();
+  });
+
+  return close;
 }

@@ -43,7 +43,7 @@ describe("hosted .html route", () => {
     await writeFile(path.join(sourceRoot, "index.html"), FRAGMENT_FIXTURE, "utf-8");
     await writeFile(
       path.join(sourceRoot, "commented.html"),
-      "﻿  <!-- generated -->\n<!DOCTYPE html>\n<p>hi</p>\n",
+      "\uFEFF  <!-- generated -->\n<!DOCTYPE html>\n<p>hi</p>\n",
       "utf-8",
     );
 
@@ -72,7 +72,7 @@ describe("hosted .html route", () => {
   it("finds a doctype behind a BOM, whitespace and comments", async () => {
     const response = await app.inject({ method: "GET", url: "/plans/commented.html" });
 
-    expect(response.body.startsWith("﻿  <!-- generated -->")).toBe(true);
+    expect(response.body.startsWith("\uFEFF  <!-- generated -->")).toBe(true);
     expect(response.body).not.toContain('<meta charset="utf-8">');
   });
 
@@ -124,6 +124,7 @@ describe("sibling assets", () => {
     await writeFile(path.join(sourceRoot, "logo.png"), PNG_FIXTURE);
     await writeFile(path.join(sourceRoot, "font.woff2"), Buffer.from([0x77, 0x4f, 0x46, 0x32]));
     await writeFile(path.join(sourceRoot, "notes.txt"), "not an asset\n");
+    await writeFile(path.join(sourceRoot, "schema.json.md"), "# Schema\n");
 
     await writeFile(path.join(parent, "secret.png"), PNG_FIXTURE);
     await symlink(path.join(parent, "secret.png"), path.join(sourceRoot, "escape.png"));
@@ -143,6 +144,13 @@ describe("sibling assets", () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toBe("text/css; charset=utf-8");
     expect(response.body).toBe("h1 { color: red }\n");
+  });
+
+  it("keeps the strict CSP and forbids sniffing on assets", async () => {
+    const response = await app.inject({ method: "GET", url: "/plans/assets/style.css" });
+
+    expect(response.headers["content-security-policy"]).toBeDefined();
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
   });
 
   it("round-trips a PNG byte-for-byte", async () => {
@@ -172,6 +180,14 @@ describe("sibling assets", () => {
     expect(response.statusCode).toBe(404);
   });
 
+  it("serves the viewer for the clean URL of an asset-named markdown file", async () => {
+    const response = await app.inject({ method: "GET", url: "/plans/schema.json" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/html");
+    expect(response.body).toContain("/api/plans/schema.json.md");
+  });
+
   it("forbids `..` traversal to an asset-shaped path", async () => {
     // Percent-encoded so the URL parser cannot collapse the climb before
     // routing; the wildcard param decodes to `../secret.png`, which only
@@ -191,7 +207,7 @@ describe("sibling assets", () => {
     const response = await app.inject({ method: "GET", url: "/api/plans/" });
     const names = (response.json() as { name: string }[]).map((e) => e.name);
 
-    expect(names).toEqual(["assets", "index.html"]);
+    expect(names).toEqual(["assets", "schema.json.md", "index.html"]);
   });
 });
 

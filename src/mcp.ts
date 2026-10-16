@@ -7,7 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type { Config, SourceConfig } from "./types.js";
-import { CLAUDE_SESSIONS_ROOT } from "./config.js";
+import { CLAUDE_SESSIONS_PREFIX } from "./config.js";
 import { isServedFile, listFiles, resolveSafePath } from "./fs.js";
 import type { Renderer } from "./renderer.js";
 
@@ -56,20 +56,28 @@ export function createMcpServer(
   }
 
   // Visible sources are surfaced in tool descriptions and `list_paths`.
-  // Hidden sources are excluded from these discovery surfaces but remain
-  // resolvable via `preview` when given an absolute path under them.
+  // Hidden sources are excluded from these discovery surfaces, except the
+  // built-in session tree below, but remain resolvable via `preview` when
+  // given an absolute path under them.
   const visibleSources = config.sources.filter((s) => !s.hidden);
 
   function sourceListDescription(): string {
     return visibleSources.map((s) => s.root).join(", ");
   }
 
-  // The session tree is a hidden source, so nothing else tells an agent
-  // that its scratchpad is previewable; the instructions name it.
+  // The built-in session tree is the one hidden source named in discovery
+  // text: nothing else tells an agent its scratchpad is previewable.
+  const sessionsRoot = config.sources.find(
+    (s) => s.prefix === CLAUDE_SESSIONS_PREFIX,
+  )?.root;
+
   const instructions = [
     "agent-md-server is a local preview host. It serves Markdown (Mermaid diagrams rendered and validated) and HTML pages (mockups, designs, reports, Claude Code Artifact pages) to a browser, with live reload. Multi-file HTML works: CSS, JS, images, fonts and JSON beside the page are served too, and a fragment page with no doctype is wrapped into standards mode, as claude.ai does at publish time.",
     "Workflow: write the file to disk, then call `preview` with its absolute path and open or share the URL it returns. Editing the file reloads the open page; for HTML, so does editing anything in its directory.",
-    `Previewable directories: ${sourceListDescription()}, and the Claude Code session tree ${CLAUDE_SESSIONS_ROOT}, which holds every session's scratchpad. Pass scratchpad paths exactly as Claude Code prints them.`,
+    `Previewable directories: ${sourceListDescription()}.` +
+      (sessionsRoot === undefined
+        ? ""
+        : ` Also the Claude Code session tree ${sessionsRoot}, which holds every session's scratchpad. Pass scratchpad paths exactly as Claude Code prints them.`),
     "Prefer this over publishing with the Artifact tool when the page should stay local and private, the file should stay on disk, you want live reload while iterating, or the page is not ready to publish. `window.claude.*` runtime capabilities are not available here.",
     `Viewer: ${viewerUrl()}`,
   ].join("\n\n");
@@ -94,7 +102,7 @@ export function createMcpServer(
       {
         name: "preview",
         description:
-          `Preview a local Markdown, Mermaid, or HTML file (mockups, designs, reports, Claude Code Artifact pages) in the browser: returns its viewer URL, which live-reloads on edit. HTML (.html) returns immediately; its sibling CSS, JS, images and fonts are served, and a fragment with no doctype is wrapped into standards mode. Markdown (.md) is rendered first and its Mermaid diagrams validated — on failure you get an error with details instead of a URL, so fix the file and call again. Directories: ${sourceListDescription()}, and Claude Code session scratchpads under ${CLAUDE_SESSIONS_ROOT}. Viewer: ${viewerUrl()}`,
+          `Preview a local Markdown, Mermaid, or HTML file (mockups, designs, reports, Claude Code Artifact pages) in the browser: returns its viewer URL, which live-reloads on edit. HTML (.html) returns immediately; its sibling CSS, JS, images and fonts are served, and a fragment with no doctype is wrapped into standards mode. Markdown (.md) is rendered first and its Mermaid diagrams validated — on failure you get an error with details instead of a URL, so fix the file and call again. Directories: ${sourceListDescription()}${sessionsRoot === undefined ? "" : `, and Claude Code session scratchpads under ${sessionsRoot}`}. Viewer: ${viewerUrl()}`,
         inputSchema: {
           type: "object" as const,
           properties: {

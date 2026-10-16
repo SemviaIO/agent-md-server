@@ -29,8 +29,11 @@ const DEFAULT_SOURCES: SourceConfig[] = [
  */
 export const CLAUDE_SESSIONS_ROOT = node_path.join(
   realpathSync("/tmp"),
-  `claude-${node_os.userInfo().uid}`,
+  // POSIX-only, like the session tree itself.
+  `claude-${process.getuid!()}`,
 );
+
+export const CLAUDE_SESSIONS_PREFIX = "claude-sessions";
 
 /**
  * Always served, whatever the config file says: a config that sets
@@ -38,7 +41,7 @@ export const CLAUDE_SESSIONS_ROOT = node_path.join(
  * exactly the deployments that have a config file.
  */
 const CLAUDE_SESSIONS_SOURCE: SourceConfig = {
-  prefix: "claude-sessions",
+  prefix: CLAUDE_SESSIONS_PREFIX,
   root: CLAUDE_SESSIONS_ROOT,
   hidden: true,
 };
