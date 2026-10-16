@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import node_fs from "node:fs/promises";
 import node_os from "node:os";
 import node_path from "node:path";
@@ -19,6 +20,31 @@ const DEFAULT_SOURCES: SourceConfig[] = [
   { prefix: "claude/plans", root: "~/.claude/plans", hidden: true },
   { prefix: "temp", root: "/tmp/agent-md-server" },
 ];
+
+/**
+ * Claude Code's per-user session tree, which holds every session's
+ * scratchpad and so every Artifact page written before publishing. Spelled
+ * the way Claude Code prints scratchpad paths (`/private/tmp/claude-501` on
+ * macOS), since the preview tool matches paths lexically.
+ */
+export const CLAUDE_SESSIONS_ROOT = node_path.join(
+  realpathSync("/tmp"),
+  // POSIX-only, like the session tree itself.
+  `claude-${process.getuid!()}`,
+);
+
+export const CLAUDE_SESSIONS_PREFIX = "claude-sessions";
+
+/**
+ * Always served, whatever the config file says: a config that sets
+ * `sources` replaces the defaults, so a default entry would vanish from
+ * exactly the deployments that have a config file.
+ */
+const CLAUDE_SESSIONS_SOURCE: SourceConfig = {
+  prefix: CLAUDE_SESSIONS_PREFIX,
+  root: CLAUDE_SESSIONS_ROOT,
+  hidden: true,
+};
 
 const DEFAULT_PORT = 3333;
 const DEFAULT_HOST = "127.0.0.1";
@@ -72,7 +98,7 @@ function validateSourceSet(prefixes: string[]) {
   }
 }
 
-function parseSources(raw: unknown): SourceConfig[] {
+export function parseSources(raw: unknown): SourceConfig[] {
   if (raw === undefined) {
     return DEFAULT_SOURCES.map((s) => ({ ...s, root: resolveTilde(s.root) }));
   }
@@ -120,6 +146,16 @@ function parseSources(raw: unknown): SourceConfig[] {
   return sources;
 }
 
+/**
+ * Append the built-in sources to the user's. A user prefix that collides
+ * with a built-in one fails the same overlap check as any other pair.
+ */
+export function withBuiltinSources(sources: SourceConfig[]): SourceConfig[] {
+  const all = [...sources, CLAUDE_SESSIONS_SOURCE];
+  validateSourceSet(all.map((s) => s.prefix));
+  return all;
+}
+
 async function readConfigFile(): Promise<RawConfig | undefined> {
   try {
     const content = await node_fs.readFile(CONFIG_PATH, "utf-8");
@@ -165,13 +201,16 @@ export async function loadConfig(): Promise<Config> {
   const raw = await readConfigFile();
   const args = parseArgs();
 
-  const sources = parseSources(raw?.sources);
-  if (sources.length === 0) {
+  const userSources = parseSources(raw?.sources);
+  const sources = withBuiltinSources(userSources);
+  if (userSources.length === 0) {
     console.warn(
-      "No sources configured; only the root index will be served.",
+      "No sources configured; only the root index and built-in sources will be served.",
     );
   }
-  await ensureDirectories(sources);
+  // Only user roots are created: the session tree belongs to Claude Code,
+  // which creates it with its own permissions.
+  await ensureDirectories(userSources);
 
   return {
     sources,

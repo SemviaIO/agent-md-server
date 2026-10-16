@@ -5,10 +5,16 @@ import { stat } from "node:fs/promises";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import type { Config } from "./types.js";
-import { resolveSafePath, readSourceFile } from "./fs.js";
+import {
+  assetContentType,
+  readSourceBytes,
+  readSourceFile,
+  resolveSafePath,
+} from "./fs.js";
+import { isNotFound, sendFsError } from "./routes/errors.js";
 import { registerApiRoutes } from "./routes/api.js";
 import { registerWatchRoutes } from "./routes/watch.js";
-import { sendFsError } from "./routes/errors.js";
+import { hostHtml } from "./templates/html-host.js";
 import { renderShell } from "./templates/shell.js";
 import { renderListingPage } from "./templates/listing-page.js";
 
@@ -22,6 +28,15 @@ function parentUrlOf(urlPrefix: string, subPath: string): string {
   return parent === "." || parent === "/" || parent === ""
     ? `${urlPrefix}/`
     : `${urlPrefix}/${parent}/`;
+}
+
+/** True when `filename` is a markdown file inside the jail. */
+async function isMarkdown(root: string, filename: string): Promise<boolean> {
+  try {
+    return (await stat(await resolveSafePath(root, filename))).isFile();
+  } catch {
+    return false;
+  }
 }
 
 declare module "fastify" {
@@ -105,10 +120,12 @@ export function createApp(config: Config): FastifyInstance {
           return;
         }
 
-        // `.html` URL → serve the file as-is for the browser to render
-        // natively (no markdown viewer shell). The strict nonce CSP is
-        // dropped here: hosted HTML carries its own inline scripts and
-        // styles that cannot be nonce-tagged, so the CSP would break it.
+        // `.html` URL → serve the page for the browser to render natively
+        // (no markdown viewer shell), wrapped at response time: a fragment
+        // gets a standards-mode skeleton and every page gets a live-reload
+        // script. The strict nonce CSP is dropped here: hosted HTML carries
+        // its own inline scripts and styles that cannot be nonce-tagged, so
+        // the CSP would break it.
         if (captured.endsWith(".html")) {
           try {
             const content = await readSourceFile(source.root, captured);
@@ -117,9 +134,32 @@ export function createApp(config: Config): FastifyInstance {
             // that may not declare its own <meta charset>, and without it
             // UTF-8 bytes render as mojibake (#38). Matches the API route.
             void reply.type("text/html; charset=utf-8");
-            return content;
+            return hostHtml(content);
           } catch (error: unknown) {
             return sendFsError(reply, error, captured);
+          }
+        }
+
+        // Sibling asset (CSS, JS, images, fonts, JSON) referenced by a
+        // hosted page → raw bytes under the same jail as every other read.
+        // The strict CSP stays: it does not reach the page that loads the
+        // asset, and it stops an SVG opened directly from running script.
+        // A missing asset whose name is the clean URL of a markdown file
+        // (`schema.json` for `schema.json.md`) falls through to the viewer.
+        const assetType = assetContentType(captured);
+        if (assetType !== undefined) {
+          try {
+            const bytes = await readSourceBytes(source.root, captured);
+            void reply.header("X-Content-Type-Options", "nosniff");
+            void reply.type(assetType);
+            return bytes;
+          } catch (error: unknown) {
+            if (
+              !isNotFound(error) ||
+              !(await isMarkdown(source.root, `${captured}.md`))
+            ) {
+              return sendFsError(reply, error, captured);
+            }
           }
         }
 

@@ -1,16 +1,18 @@
 # agent-md-server
 
-A thin server for helping you and your agent of choice communicate with rendered Markdown and Mermaid diagrams.
+A local preview host for you and your agent of choice: rendered Markdown with Mermaid diagrams, and HTML pages — mockups, designs, reports, and Claude Code Artifact pages — viewed in the browser while the files stay on disk.
 
 ## Features
 
 - Renders Mermaid diagrams with dark theme support
 - GitHub-style markdown rendering with syntax highlighting
+- HTML preview: Claude Code Artifact pages render as they do on claude.ai — a fragment page is wrapped into standards mode, and sibling CSS, JS, images, fonts and JSON load by relative path
+- Serves the Claude Code session tree, so a page in a session scratchpad is previewable without copying it anywhere
 - Config-driven source directories (serve multiple folders)
 - Recursive directory browsing — point a source at a tree and navigate it lazily, one directory per request
-- Live reload via Server-Sent Events (SSE) -- pages update when files change
+- Live reload via Server-Sent Events (SSE) — Markdown pages update when the file changes, HTML pages when anything in their directory changes
 - Tailscale integration for secure remote access
-- MCP server for agent integration (write, edit, and validate documents)
+- MCP server for agent integration: one `preview` call turns an absolute path into a viewer URL
 - Mermaid syntax validation with error feedback
 - Dark theme UI styled after GitHub
 
@@ -23,8 +25,8 @@ node dist/main.js
 
 Open <http://localhost:3333/> in your browser.
 
-The server serves `.md` files (rendered on demand) and `.html` files (served as-is) from
-the configured source directories.
+The server serves `.md` files (rendered on demand) and `.html` pages (rendered natively by the
+browser, with their sibling assets) from the configured source directories.
 No build step is needed for content -- write a file, open the URL, and it appears.
 
 ## Configuration
@@ -53,7 +55,7 @@ Each source is an object with a URL `prefix` and a filesystem `root`, matching `
 
 - `prefix` — one or more `[a-z0-9-]` segments joined by `/`. Each segment becomes a URL path segment — e.g. `claude/plans` is served at `/claude/plans/`.
 - `root` — filesystem directory. Supports `~` expansion to the home directory. Created automatically if it does not exist.
-- `hidden` — optional boolean (default `false`). When `true`, the source is served normally but omitted from MCP tool descriptions, `list_paths`, and the browser root index. Use for fallback directories you want available by absolute-path lookup without advertising them.
+- `hidden` — optional boolean (default `false`). When `true`, the source is served normally but omitted from MCP tool descriptions, `list_paths`, and the browser root index (the built-in `claude-sessions` source is still named in the MCP text). Use for fallback directories you want available by absolute-path lookup without advertising them.
 
 Two sources cannot have overlapping prefixes (e.g. `plans` and `plans/foo` would collide) — the server exits at boot with a clear error if this happens.
 
@@ -64,6 +66,14 @@ Default sources when no config file is present:
 | `plans` | `~/plans` | |
 | `claude/plans` | `~/.claude/plans` | ✓ |
 | `temp` | `/tmp/agent-md-server` | |
+
+One source is built in and always served, whether or not `sources` is set:
+
+| Prefix | Root | Hidden |
+|--------|------|:-:|
+| `claude-sessions` | `/private/tmp/claude-<uid>` on macOS (`/tmp/claude-<uid>` on Linux) | ✓ |
+
+This is the Claude Code session tree, which holds every session's scratchpad, so pages the Artifact tool writes there are previewable in place. The root is the realpath of `/tmp`, matching how Claude Code prints scratchpad paths; pass paths to `preview` in that form. The server does not create this directory — Claude Code does. A user source cannot use the `claude-sessions` prefix.
 
 > **Note:** In v0.1.0 the `sources` field changed from a `{name: path}` map to a list of `{prefix, root, hidden?}` objects. The old shape is rejected at boot with an error pointing to the new shape.
 
@@ -93,22 +103,20 @@ Any MCP-compatible agent (Claude Code, Cursor, etc.) can connect to it.
 claude mcp add --transport http --scope user agent-md-server http://127.0.0.1:3333/mcp
 ```
 
+The server also sends MCP `instructions` describing it as a local preview host for Markdown and HTML, so agents find it when they need to preview a page.
+
 ### MCP tools
 
-| Tool | Description | Localhost only |
-|------|-------------|:-:|
-| `write_document` | Write a markdown file. Validates mermaid blocks and returns errors. | Yes |
-| `edit_document` | Edit a file with one or more `{ oldText, newText }` replacements. Supports `dryRun`. | Yes |
-| `read_document` | Read the raw markdown content of a file. | No |
-| `list_documents` | List all markdown files in a source directory. | No |
+| Tool | Input | Returns |
+|------|-------|---------|
+| `preview` | `path`: absolute path to a `.md` or `.html` file under a source | `{"status": "ok", "url": "..."}`. For `.md`, Mermaid diagrams are validated first; a parse failure returns the errors instead of a URL. `.html` returns immediately. |
+| `list_paths` | none | The `.md` and `.html` files at the top level of each visible source, as absolute paths grouped by directory. |
 
-Mutating tools (`write_document`, `edit_document`) are blocked for non-localhost requests (e.g. via Tailscale).
-Read-only tools work from anywhere.
+Both tools are read-only. Hidden sources resolve through `preview` but are left out of `list_paths` and the tool descriptions, except the built-in `claude-sessions` root, which the instructions and the `preview` description name so agents know their scratchpad is previewable.
 
-The `write_document` and `edit_document` tools validate mermaid code blocks server-side using `mermaid.parse()`.
-If any block has syntax errors, the response includes per-block errors so the agent can fix them in the same turn.
+### Previewing Claude Code Artifact pages
 
-`edit_document` follows the [MCP filesystem `edit_file` convention](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem) -- multiple edits per call, applied sequentially, with optional `dryRun` preview.
+Write the page (and any CSS, JS, images, fonts or JSON it references by relative path) to the session scratchpad, then call `preview` on the page's absolute path. The page renders as the Artifact tool's published version would: a main page with no `<!doctype` is served inside `<!doctype html>`, `<meta charset="utf-8">` and a viewport meta, as claude.ai does at publish time. Editing the page or any file in its directory reloads the open tab. `window.claude.*` runtime capabilities and typed Artifacts (Slides, Design) are claude.ai-only and not available locally.
 
 ## Tailscale
 
@@ -137,7 +145,9 @@ configured out of band.
 /:source/sub/                  Listing for a sub-directory
 /:source/foo                   Rendered markdown (clean URL, no .md)
 /:source/sub/foo               Rendered markdown for a nested file
-/:source/page.html             Hosted HTML file (served as-is)
+/:source/page.html             Hosted HTML page (skeleton for fragments, live-reload script)
+/:source/sub/style.css         Sibling asset of a hosted page (css, js, mjs, json, svg, png,
+                               jpg, jpeg, webp, gif, ico, woff, woff2)
 /api/:source/                  JSON listing (files + directories)
 /api/:source/sub/              JSON listing for a sub-directory
 /api/:source/foo.md            Raw markdown content
@@ -145,20 +155,21 @@ configured out of band.
 /api/:source/page.html         Raw HTML content
 /events/:source/foo.md         SSE stream (emits on file change)
 /events/:source/sub/foo.md     SSE stream for a nested file
+/events/:source/page.html      SSE stream (emits on any change in the page's directory tree)
 ```
 
 `:source` may itself be a multi-segment prefix (e.g. `claude/plans`), in which case the URLs include each segment — `/claude/plans/foo`, `/api/claude/plans/foo.md`, etc.
 
-Sub-paths under a source are resolved lazily: each listing request reads exactly the directory it lists, with no upfront scan. Listings include `.md` files, `.html` files, and subdirectories (entries carry a `kind: "file" | "dir"` field). `.html` files are served as-is for the browser to render natively — the markdown viewer shell and SSE live-reload apply only to `.md` files. Because hosted HTML carries its own inline scripts and styles, the strict nonce-based Content-Security-Policy is dropped for raw HTML responses. The following directory names are silently omitted from listings as a noise filter, so a source can safely point at a dev tree like `~/projects`:
+Sub-paths under a source are resolved lazily: each listing request reads exactly the directory it lists, with no upfront scan. Listings include `.md` files, `.html` files, and subdirectories (entries carry a `kind: "file" | "dir"` field). Sibling assets are served by URL but never listed. `.html` pages are rendered natively by the browser, without the markdown viewer shell. The viewer route wraps a page at response time, never on disk: a page without a doctype gets a minimal standards-mode skeleton, and every page gets an inline script that reloads it from `/events/`. Because hosted HTML carries its own inline scripts and styles, the strict nonce-based Content-Security-Policy is dropped for HTML responses. Asset responses keep it, plus `X-Content-Type-Options: nosniff`. A request for a missing asset-shaped name that is the clean URL of a markdown file (`schema.json` for `schema.json.md`) gets the viewer. Page live reload ignores changes inside the denylisted directories below. The following directory names are silently omitted from listings as a noise filter, so a source can safely point at a dev tree like `~/projects`:
 
 ```
 node_modules, .git, dist, build, target, .next, .venv, __pycache__
 ```
 
-The denylist is a discovery filter only — direct URLs into those directories still resolve via the same `resolveSafePath` jail used by every other read.
+The denylist is a discovery filter only — direct URLs into those directories still resolve via the same `resolveSafePath` jail used by every other read, assets included.
 
-The `/api/` endpoints return JSON (listings) or raw file content (`.md` as `text/markdown`, `.html` as `text/html`).
-The `/events/` endpoint opens a persistent SSE connection that sends a `changed` event whenever the file is modified on disk.
+The `/api/` endpoints return JSON (listings) or raw file content (`.md` as `text/markdown`, `.html` as `text/html`, with no skeleton or script).
+The `/events/` endpoint opens a persistent SSE connection that sends a `changed` event whenever the file (for `.html`, anything under its directory) is modified on disk.
 The HTML views use these APIs internally -- the browser fetches markdown via `/api/`, renders it client-side, and subscribes to `/events/` for live updates.
 
 ## Development

@@ -1,7 +1,7 @@
 {
   "name": "agent-md-server",
   "version": "0.1.0",
-  "description": "A thin server for rendering Markdown with Mermaid diagrams from configurable directories",
+  "description": "Local preview host for Markdown with Mermaid diagrams and HTML pages (mockups, designs, Claude Code Artifact pages), with live reload and an MCP preview tool",
   "type": "module",
   "main": "dist/main.js",
   "bin": {
@@ -21,8 +21,13 @@
   "keywords": [
     "mermaid",
     "markdown",
+    "html",
+    "preview",
     "server",
     "claude",
+    "claude-code",
+    "artifacts",
+    "mcp",
     "diagrams"
   ],
   "author": "SemviaIO",

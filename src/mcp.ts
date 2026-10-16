@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type { Config, SourceConfig } from "./types.js";
+import { CLAUDE_SESSIONS_PREFIX } from "./config.js";
 import { isServedFile, listFiles, resolveSafePath } from "./fs.js";
 import type { Renderer } from "./renderer.js";
 
@@ -48,11 +49,6 @@ export function createMcpServer(
   config: Config,
   renderer: ValidatingRenderer,
 ): Server {
-  const server = new Server(
-    { name: "agent-md-server", version: "0.1.0" },
-    { capabilities: { tools: {} } },
-  );
-
   const baseUrl = `http://${config.host}:${config.port}`;
 
   function viewerUrl(): string {
@@ -60,13 +56,36 @@ export function createMcpServer(
   }
 
   // Visible sources are surfaced in tool descriptions and `list_paths`.
-  // Hidden sources are excluded from these discovery surfaces but remain
-  // resolvable via `get_url` when given an absolute path under them.
+  // Hidden sources are excluded from these discovery surfaces, except the
+  // built-in session tree below, but remain resolvable via `preview` when
+  // given an absolute path under them.
   const visibleSources = config.sources.filter((s) => !s.hidden);
 
   function sourceListDescription(): string {
     return visibleSources.map((s) => s.root).join(", ");
   }
+
+  // The built-in session tree is the one hidden source named in discovery
+  // text: nothing else tells an agent its scratchpad is previewable.
+  const sessionsRoot = config.sources.find(
+    (s) => s.prefix === CLAUDE_SESSIONS_PREFIX,
+  )?.root;
+
+  const instructions = [
+    "agent-md-server is a local preview host. It serves Markdown (Mermaid diagrams rendered and validated) and HTML pages (mockups, designs, reports, Claude Code Artifact pages) to a browser, with live reload. Multi-file HTML works: CSS, JS, images, fonts and JSON beside the page are served too, and a fragment page with no doctype is wrapped into standards mode, as claude.ai does at publish time.",
+    "Workflow: write the file to disk, then call `preview` with its absolute path and open or share the URL it returns. Editing the file reloads the open page; for HTML, so does editing anything in its directory.",
+    `Previewable directories: ${sourceListDescription()}.` +
+      (sessionsRoot === undefined
+        ? ""
+        : ` Also the Claude Code session tree ${sessionsRoot}, which holds every session's scratchpad. Pass scratchpad paths exactly as Claude Code prints them.`),
+    "Prefer this over publishing with the Artifact tool when the page should stay local and private, the file should stay on disk, you want live reload while iterating, or the page is not ready to publish. `window.claude.*` runtime capabilities are not available here.",
+    `Viewer: ${viewerUrl()}`,
+  ].join("\n\n");
+
+  const server = new Server(
+    { name: "agent-md-server", version: "0.1.0" },
+    { capabilities: { tools: {} }, instructions },
+  );
 
   function pathNotInSourceError(): { content: { type: string; text: string }[]; isError: true } {
     return {
@@ -81,9 +100,9 @@ export function createMcpServer(
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
-        name: "get_url",
+        name: "preview",
         description:
-          `Returns the viewer URL for a hosted .md or .html file. Markdown is rendered first and its Mermaid diagrams validated — on failure you get an error with details instead of a URL, so fix the file and call again. HTML is served as-is and returns immediately. Configured directories: ${sourceListDescription()}. Viewer: ${viewerUrl()}`,
+          `Preview a local Markdown, Mermaid, or HTML file (mockups, designs, reports, Claude Code Artifact pages) in the browser: returns its viewer URL, which live-reloads on edit. HTML (.html) returns immediately; its sibling CSS, JS, images and fonts are served, and a fragment with no doctype is wrapped into standards mode. Markdown (.md) is rendered first and its Mermaid diagrams validated — on failure you get an error with details instead of a URL, so fix the file and call again. Directories: ${sourceListDescription()}${sessionsRoot === undefined ? "" : `, and Claude Code session scratchpads under ${sessionsRoot}`}. Viewer: ${viewerUrl()}`,
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -102,7 +121,7 @@ export function createMcpServer(
       {
         name: "list_paths",
         description:
-          "Lists all files currently hosted by the server (.md and .html), as absolute filesystem paths grouped by directory.",
+          "List the Markdown and HTML pages (.md, .html) ready to preview at the top level of each advertised directory, as absolute filesystem paths grouped by directory. Pass one to `preview` for its URL.",
         inputSchema: {
           type: "object" as const,
           properties: {},
@@ -119,7 +138,7 @@ export function createMcpServer(
     const { name, arguments: args } = request.params;
 
     switch (name) {
-      case "get_url": {
+      case "preview": {
         const filePath = String(args?.path ?? "");
         if (!path.isAbsolute(filePath)) {
           return {
@@ -134,11 +153,9 @@ export function createMcpServer(
         // Extension shape is an argument error, so it is answered before any
         // filesystem work — otherwise a nonexistent `.txt` would come back as
         // ENOENT, implying that creating the file would make the call work.
-        // Wording matches the API route's 404 so both layers speak with one
-        // voice.
         if (!isServedFile(match.relative)) {
           return {
-            content: [{ type: "text", text: "Only .md and .html files are served" }],
+            content: [{ type: "text", text: "Only .md and .html files can be previewed" }],
             isError: true,
           };
         }
@@ -162,10 +179,10 @@ export function createMcpServer(
           : match.relative;
         const url = `${viewerUrl()}/${match.source.prefix}/${viewName}`;
 
-        // Only markdown is rendered and validated. Hosted HTML is served
-        // as-is, with no viewer shell and so no `[data-render-status]`
-        // sentinel for the renderer to wait on, and no Mermaid to validate —
-        // routing it through Playwright is what made get_url time out (#37).
+        // Only markdown is rendered and validated. Hosted HTML has no
+        // viewer shell and so no `[data-render-status]` sentinel for the
+        // renderer to wait on, and no Mermaid to validate — routing it
+        // through Playwright is what made the tool time out (#37).
         // Its URL falls straight through to the shared success return below,
         // on the strength of the jail check above having proved the file
         // exists.
@@ -183,7 +200,7 @@ export function createMcpServer(
               .map((e, i) => `  ${i + 1}. ${e}`)
               .join("\n");
             return {
-              content: [{ type: "text", text: `Mermaid rendering errors — fix and call get_url again:\n${errorList}` }],
+              content: [{ type: "text", text: `Mermaid rendering errors — fix and call preview again:\n${errorList}` }],
               isError: true,
             };
           }

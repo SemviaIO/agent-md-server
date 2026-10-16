@@ -1,6 +1,6 @@
 // Stress-reproduces the Mach-port leak from issue #22 and verifies the
 // renderer-lifecycle fix. Generates N distinct .md files under a temp
-// source directory, calls `get_url` for each via the MCP HTTP endpoint,
+// source directory, calls `preview` for each via the MCP HTTP endpoint,
 // and asserts that `[renderer] launching chromium` appears at most
 // --max-launches times in the server log since the script started.
 //
@@ -134,7 +134,7 @@ async function callGetUrl(
     id,
     method: "tools/call",
     params: {
-      name: "get_url",
+      name: "preview",
       arguments: { path: filePath },
     },
   };
@@ -262,7 +262,7 @@ async function main(): Promise<void> {
   console.log(`[stress] generating ${opts.count} .md files in ${opts.workDir}`);
   const paths = await generateFiles(opts);
 
-  console.log(`[stress] issuing ${opts.count} get_url calls`);
+  console.log(`[stress] issuing ${opts.count} preview calls`);
   const outcomes = await runWithConcurrency(paths, opts.concurrency, opts.endpoint);
 
   const elapsedMs = Math.round(performance.now() - startPerf);
