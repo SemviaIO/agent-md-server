@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { CLAUDE_SESSIONS_ROOT } from "./config.js";
 import { createMcpServer, type ValidatingRenderer } from "./mcp.js";
 import type { RenderResult } from "./renderer.js";
 import type { Config } from "./types.js";
@@ -41,7 +42,7 @@ function textOf(result: Record<string, unknown>): string {
   return first.text;
 }
 
-describe("mcp get_url", () => {
+describe("mcp preview", () => {
   let sourceRoot: string;
   let renderer: StubRenderer;
   let client: Client;
@@ -83,7 +84,7 @@ describe("mcp get_url", () => {
 
   it("returns a URL for a hosted .html file without invoking the renderer", async () => {
     const result = await client.callTool({
-      name: "get_url",
+      name: "preview",
       arguments: { path: path.join(sourceRoot, "page.html") },
     });
 
@@ -97,7 +98,7 @@ describe("mcp get_url", () => {
 
   it("still renders and validates a .md file, returning its extensionless URL", async () => {
     const result = await client.callTool({
-      name: "get_url",
+      name: "preview",
       arguments: { path: path.join(sourceRoot, "doc.md") },
     });
 
@@ -123,7 +124,7 @@ describe("mcp get_url", () => {
     };
 
     const result = await client.callTool({
-      name: "get_url",
+      name: "preview",
       arguments: { path: path.join(sourceRoot, "doc.md") },
     });
 
@@ -131,14 +132,14 @@ describe("mcp get_url", () => {
     expect(textOf(result)).toContain("Parse error on line 2");
   });
 
-  it("rejects an extension the server does not host, with the API route's wording", async () => {
+  it("rejects an extension that cannot be previewed", async () => {
     const result = await client.callTool({
-      name: "get_url",
+      name: "preview",
       arguments: { path: path.join(sourceRoot, "notes.txt") },
     });
 
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toBe("Only .md and .html files are served");
+    expect(textOf(result)).toBe("Only .md and .html files can be previewed");
     expect(renderer.calls).toEqual([]);
   });
 
@@ -148,12 +149,12 @@ describe("mcp get_url", () => {
     // and absent distinguishes them, and jail-first would answer ENOENT —
     // implying that creating the file would make the call work.
     const result = await client.callTool({
-      name: "get_url",
+      name: "preview",
       arguments: { path: path.join(sourceRoot, "no-such.txt") },
     });
 
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toBe("Only .md and .html files are served");
+    expect(textOf(result)).toBe("Only .md and .html files can be previewed");
     expect(renderer.calls).toEqual([]);
   });
 
@@ -162,7 +163,7 @@ describe("mcp get_url", () => {
     // containment is checked, so `a..b/` is a plain directory — it must not
     // be mistaken for an escape attempt.
     const result = await client.callTool({
-      name: "get_url",
+      name: "preview",
       arguments: { path: path.join(sourceRoot, "a..b", "notes.md") },
     });
 
@@ -175,7 +176,7 @@ describe("mcp get_url", () => {
 
   it("reports a missing file rather than handing back a URL", async () => {
     const result = await client.callTool({
-      name: "get_url",
+      name: "preview",
       arguments: { path: path.join(sourceRoot, "nope.md") },
     });
 
@@ -194,7 +195,7 @@ describe("mcp get_url", () => {
     // a plain out-of-source path, leaving the tool's own resolve — the thing
     // this pins — unexercised.
     const result = await client.callTool({
-      name: "get_url",
+      name: "preview",
       arguments: { path: `${sourceRoot}/a..b/../../escaped.md` },
     });
 
@@ -205,7 +206,7 @@ describe("mcp get_url", () => {
 
   it("rejects a path outside every configured source", async () => {
     const result = await client.callTool({
-      name: "get_url",
+      name: "preview",
       arguments: { path: path.join(os.tmpdir(), "elsewhere.md") },
     });
 
@@ -217,15 +218,31 @@ describe("mcp get_url", () => {
   it("declares both hosted formats in the tool descriptions", async () => {
     const { tools } = await client.listTools();
 
-    const getUrl = tools.find((t) => t.name === "get_url");
-    expect(getUrl?.description).toContain(".md");
-    expect(getUrl?.description).toContain(".html");
-    expect(getUrl?.inputSchema.properties?.path).toMatchObject({
+    const preview = tools.find((t) => t.name === "preview");
+    expect(preview?.description).toMatch(/^Preview a local Markdown, Mermaid, or HTML file/);
+    expect(preview?.description).toContain(".md");
+    expect(preview?.description).toContain(".html");
+    expect(preview?.inputSchema.properties?.path).toMatchObject({
       description: "Absolute filesystem path to a .md or .html file",
     });
 
     const listPaths = tools.find((t) => t.name === "list_paths");
     expect(listPaths?.description).toContain(".md");
     expect(listPaths?.description).toContain(".html");
+  });
+
+  it("exposes `preview` and `list_paths`, with no `get_url` alias", async () => {
+    const { tools } = await client.listTools();
+
+    expect(tools.map((t) => t.name).sort()).toEqual(["list_paths", "preview"]);
+  });
+
+  it("tells agents in its instructions that it previews HTML and Artifact pages", () => {
+    const instructions = client.getInstructions();
+
+    expect(instructions).toContain("HTML");
+    expect(instructions).toContain("Artifact");
+    expect(instructions).toContain("`preview`");
+    expect(instructions).toContain(CLAUDE_SESSIONS_ROOT);
   });
 });

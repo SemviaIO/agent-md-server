@@ -26,7 +26,7 @@ export interface SourceConfig {
   /** Filesystem directory. */
   root: string;
   /**
-   * When true, the source is served (routes register, `get_url` resolves) but
+   * When true, the source is served (routes register, `preview` resolves) but
    * is omitted from MCP tool descriptions, `list_paths`, and the browser root
    * index. Use for fallback directories you want available by absolute-path
    * lookup without advertising them.
