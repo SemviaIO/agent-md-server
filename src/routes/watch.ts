@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 
-import { readSourceFile, watchFile } from "../fs.js";
+import { readSourceFile, watchFile, watchPageDirectory } from "../fs.js";
 import type { SourceConfig } from "../types.js";
 import { sendFsError } from "./errors.js";
 
@@ -14,8 +14,11 @@ export function registerWatchRoutes(
       async (request, reply) => {
         const filename = request.params["*"];
 
-        if (!filename.endsWith(".md")) {
-          return reply.status(404).send({ error: "Only .md files are served" });
+        const isPage = filename.endsWith(".html");
+        if (!filename.endsWith(".md") && !isPage) {
+          return reply
+            .status(404)
+            .send({ error: "Only .md and .html files are watched" });
         }
 
         // Validate the file via readSourceFile (full resolveSafePath check)
@@ -34,7 +37,10 @@ export function registerWatchRoutes(
         });
         reply.hijack();
 
-        const cleanup = watchFile(source.root, filename, () => {
+        // A hosted page reloads when its directory changes, so edits to its
+        // CSS, scripts or images count as well as edits to the page.
+        const watch = isPage ? watchPageDirectory : watchFile;
+        const cleanup = watch(source.root, filename, () => {
           reply.raw.write("data: changed\n\n");
         });
 

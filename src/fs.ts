@@ -29,13 +29,40 @@ const IGNORED_DIRS = new Set([
 
 /**
  * File extensions the server hosts. `.md` is rendered through the markdown
- * viewer; `.html` is served as-is. Anything else is omitted from listings
- * and 404s on direct fetch.
+ * viewer; `.html` is served as a standalone page. Anything else is omitted
+ * from listings; of those, only the sibling assets below are served.
  */
 const SERVED_EXTENSIONS = [".md", ".html"];
 
 export function isServedFile(name: string): boolean {
   return SERVED_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
+
+/**
+ * Sibling assets a hosted `.html` page may reference by relative path, with
+ * the `Content-Type` each is served under. They back a page rather than
+ * being hosted in their own right, so they never appear in listings and
+ * `isServedFile` does not accept them.
+ */
+const ASSET_CONTENT_TYPES: Record<string, string> = {
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
+
+/** `Content-Type` for a sibling asset, or undefined if `name` is not one. */
+export function assetContentType(name: string): string | undefined {
+  return ASSET_CONTENT_TYPES[path.posix.extname(name).toLowerCase()];
 }
 
 /**
@@ -143,28 +170,65 @@ export async function readSourceFile(
   return readFile(safePath, "utf-8");
 }
 
+/** Like `readSourceFile`, but as raw bytes so images and fonts round-trip. */
+export async function readSourceBytes(
+  sourceDir: string,
+  filename: string,
+): Promise<Buffer> {
+  const safePath = await resolveSafePath(sourceDir, filename);
+  return readFile(safePath);
+}
+
 export function watchFile(
   sourceDir: string,
   filename: string,
   onChange: () => void,
 ): () => void {
+  return watchDebounced(lexicalJail(sourceDir, filename), false, onChange);
+}
+
+/**
+ * Watch the directory holding a hosted page, recursively, so an edit to the
+ * page or to any asset beside or below it (e.g. `assets/style.css`) fires.
+ * The same caller contract as `watchFile` applies: validate `filename`
+ * through `resolveSafePath` first.
+ */
+export function watchPageDirectory(
+  sourceDir: string,
+  filename: string,
+  onChange: () => void,
+): () => void {
+  const page = lexicalJail(sourceDir, filename);
+  return watchDebounced(path.dirname(page), true, onChange);
+}
+
+/**
+ * Synchronous prefix check -- the same logic as resolveSafePath but without
+ * the async realpath step. Callers MUST run readSourceFile (or an
+ * equivalent resolveSafePath call) before watching, since that is what
+ * catches symlink escapes; this function only validates the normalised
+ * lexical path.
+ */
+function lexicalJail(sourceDir: string, filename: string): string {
   const resolvedRoot = path.resolve(sourceDir);
   const joined = path.resolve(resolvedRoot, filename);
 
-  // Synchronous prefix check -- the same logic as resolveSafePath but
-  // without the async realpath step. Callers MUST run readSourceFile (or
-  // an equivalent resolveSafePath call) before invoking watchFile, since
-  // that is what catches symlink escapes; this function only validates
-  // the normalised lexical path.
   if (joined !== resolvedRoot && !joined.startsWith(resolvedRoot + path.sep)) {
     throw new Error(
       `Path traversal attempt: "${filename}" resolves outside source directory`,
     );
   }
+  return joined;
+}
 
+function watchDebounced(
+  target: string,
+  recursive: boolean,
+  onChange: () => void,
+): () => void {
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const watcher: FSWatcher = watch(joined, (_event) => {
+  const watcher: FSWatcher = watch(target, { recursive }, (_event) => {
     if (debounceTimer !== undefined) {
       clearTimeout(debounceTimer);
     }
