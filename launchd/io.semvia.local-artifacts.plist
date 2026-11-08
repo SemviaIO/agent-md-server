@@ -3,7 +3,8 @@
 <!--
   Template: __REPO__ is the checkout path. To install or reload, from the checkout:
     sed "s|__REPO__|$PWD|g" launchd/io.semvia.local-artifacts.plist > ~/Library/LaunchAgents/io.semvia.local-artifacts.plist
-    launchctl bootout gui/$(id -u)/io.semvia.local-artifacts; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.semvia.local-artifacts.plist
+    launchctl bootout gui/$(id -u)/io.semvia.local-artifacts; sleep 2; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.semvia.local-artifacts.plist
+  bootout returns before teardown finishes; if bootstrap still reports an I/O error, run it again.
 
   ProgramArguments runs launchd/run.sh, which resolves the real Volta-pinned
   Node binary and exec-replaces itself with it. This keeps launchd's tracked

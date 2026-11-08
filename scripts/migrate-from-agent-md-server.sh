@@ -37,8 +37,8 @@ wait_unloaded() {
   done
 }
 
-# A failed bootstrap (no gui domain over SSH) is reported here and caught by
-# the verification at the end, which fails the run.
+# A refused bootstrap (an SSH session while the console is logged in) is
+# reported here and caught by the verification at the end, which fails the run.
 bootstrap_agent() {
   if launchctl bootstrap "$domain" "$NEW_PLIST"; then
     echo "launchd: $1 $NEW_LABEL"
@@ -103,11 +103,10 @@ fi
 
 # 4. MCP registration.
 claude mcp remove agent-md-server --scope user >/dev/null 2>&1 || true
-if claude mcp get local-artifacts >/dev/null 2>&1; then
-  echo "mcp: local-artifacts already registered"
-else
-  claude mcp add --transport http --scope user local-artifacts "${URL}mcp"
-fi
+# Re-added unconditionally: `claude mcp get` health-checks the server, so its
+# exit code cannot tell a missing entry from a server still starting.
+claude mcp remove local-artifacts --scope user >/dev/null 2>&1 || true
+claude mcp add --transport http --scope user local-artifacts "${URL}mcp"
 
 # 5. Verify the end state.
 failed=0
@@ -130,11 +129,11 @@ while [ "$tries" -lt 20 ]; do
   info="$(launchctl print "$domain/$NEW_LABEL" 2>/dev/null || true)"
   launchd_pid="$(printf '%s\n' "$info" | sed -n 's/^[[:space:]]*pid = \([0-9][0-9]*\)$/\1/p' | head -n 1)"
   listen_pid="$(lsof -nP -iTCP:3333 -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
-  body="$(curl -s "$URL" || true)"
-  if [ -n "$launchd_pid" ] && [ "$launchd_pid" = "$listen_pid" ] \
-    && printf '%s' "$body" | grep -q '<title>local-artifacts</title>'; then
-    served=1
-    break
+  body="$(curl -s -m 1 "$URL" || true)"
+  if [ -n "$launchd_pid" ] && [ "$launchd_pid" = "$listen_pid" ]; then
+    case "$body" in
+      *'<title>local-artifacts</title>'*) served=1; break ;;
+    esac
   fi
   sleep 0.5
   tries=$((tries + 1))
