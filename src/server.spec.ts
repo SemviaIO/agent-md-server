@@ -294,6 +294,7 @@ describe("host guard", () => {
     app = createApp(config);
     // Registered after createApp returns, standing in for main.ts's /mcp.
     app.get("/late", async () => "late route");
+    app.post("/late", async () => "late route");
     await app.ready();
   });
 
@@ -305,10 +306,17 @@ describe("host guard", () => {
   const get = (url: string, host: string) =>
     app.inject({ method: "GET", url, headers: { host } });
 
-  it.each(["/api/plans/", "/api/plans/secret.md", "/plans/page.html", "/late"])(
-    "rejects a foreign Host on %s",
-    async (url) => {
-      const response = await get(url, "evil.example");
+  it.each([
+    ["GET", "/api/plans/"],
+    ["GET", "/api/plans/secret.md"],
+    ["GET", "/plans/page.html"],
+    ["GET", "/late"],
+    ["POST", "/late"],
+    ["GET", "/no-such-path"],
+  ] as const)(
+    "rejects a foreign Host on %s %s",
+    async (method, url) => {
+      const response = await app.inject({ method, url, headers: { host: "evil.example" } });
 
       expect(response.statusCode).toBe(403);
       expect(response.json()).toEqual({ error: 'Host not allowed: "evil.example"' });

@@ -90,9 +90,17 @@ async function main() {
   }
 
   if (config.tailscale) {
-    config.tailscaleUrl = await setupTailscale(config.port);
+    // Assigned before `tailscale serve` runs: the host guard admits the
+    // tailnet hostname from this point, so a serve rule persisted from an
+    // earlier run forwards working requests even if the CLI is slow or hangs.
+    config.tailscaleUrl = await resolveTailscaleUrl();
     if (config.tailscaleUrl) {
       console.log(`Tailscale: ${config.tailscaleUrl}`);
+      // (Re)establish the tailnet HTTPS proxy on every startup. `tailscale serve`
+      // persists its rule in tailscaled, but reboots / app updates / `serve reset`
+      // can wipe it -- re-running here keeps the exposure self-healing so the
+      // advertised URL never points at a dead listener.
+      await ensureServeProxy(config.port);
     }
   }
 
@@ -102,7 +110,8 @@ async function main() {
   console.log("Playwright renderer ready");
 }
 
-async function setupTailscale(port: number): Promise<string | undefined> {
+/** The tailnet URL of this machine, or undefined when Tailscale is not up. */
+async function resolveTailscaleUrl(): Promise<string | undefined> {
   try {
     // Find the Tailscale IP from network interfaces (CGNAT range 100.64.0.0/10)
     const tailscaleIp = findTailscaleIp();
@@ -121,12 +130,6 @@ async function setupTailscale(port: number): Promise<string | undefined> {
     if (!dnsName) {
       return undefined;
     }
-
-    // (Re)establish the tailnet HTTPS proxy on every startup. `tailscale serve`
-    // persists its rule in tailscaled, but reboots / app updates / `serve reset`
-    // can wipe it -- re-running here keeps the exposure self-healing so the
-    // advertised URL never points at a dead listener.
-    await ensureServeProxy(port);
 
     return `https://${dnsName}/`;
   } catch (error: unknown) {
