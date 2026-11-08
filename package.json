@@ -1,11 +1,11 @@
 {
-  "name": "agent-md-server",
+  "name": "local-artifacts",
   "version": "0.1.0",
   "description": "Local preview host for Markdown with Mermaid diagrams and HTML pages (mockups, designs, Claude Code Artifact pages), with live reload and an MCP preview tool",
   "type": "module",
   "main": "dist/main.js",
   "bin": {
-    "agent-md-server": "dist/main.js"
+    "local-artifacts": "dist/main.js"
   },
   "scripts": {
     "build": "tsup",

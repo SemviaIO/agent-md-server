@@ -7,7 +7,7 @@
 // Run by hand:  pnpm stress
 //
 // MUST: kick the server to a known state first:
-//   launchctl kickstart -k gui/$(id -u)/io.semvia.agent-md-server
+//   launchctl kickstart -k gui/$(id -u)/io.semvia.local-artifacts
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
@@ -50,12 +50,12 @@ function parseOptions(): Options {
     options: {
       count: { type: "string", default: "100" },
       "max-launches": { type: "string", default: "2" },
-      "log-path": { type: "string", default: "/tmp/agent-md-server.log" },
+      "log-path": { type: "string", default: "/tmp/local-artifacts.log" },
       concurrency: { type: "string", default: "1" },
       endpoint: { type: "string", default: "http://127.0.0.1:3333/mcp" },
       "work-dir": {
         type: "string",
-        default: "/tmp/agent-md-server/stress",
+        default: "/tmp/local-artifacts/stress",
       },
     },
     strict: true,
@@ -241,10 +241,10 @@ async function countLaunchLines(
 }
 
 function banner(opts: Options): void {
-  console.log("[stress] agent-md-server renderer stress test");
+  console.log("[stress] local-artifacts renderer stress test");
   console.log(
     `[stress] kick the server first:\n` +
-      `         launchctl kickstart -k gui/$(id -u)/io.semvia.agent-md-server`,
+      `         launchctl kickstart -k gui/$(id -u)/io.semvia.local-artifacts`,
   );
   console.log(
     `[stress] count=${opts.count} concurrency=${opts.concurrency} max-launches=${opts.maxLaunches}`,

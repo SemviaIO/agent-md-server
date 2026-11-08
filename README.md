@@ -1,4 +1,4 @@
-# agent-md-server
+# local-artifacts
 
 A local preview host for you and your agent of choice: rendered Markdown with Mermaid diagrams, and HTML pages — mockups, designs, reports, and Claude Code Artifact pages — viewed in the browser while the files stay on disk.
 
@@ -29,16 +29,41 @@ The server serves `.md` files (rendered on demand) and `.html` pages (rendered n
 browser, with their sibling assets) from the configured source directories.
 No build step is needed for content -- write a file, open the URL, and it appears.
 
+## Migrating from agent-md-server
+
+This project was called `agent-md-server`. A machine running the old LaunchAgent migrates once, in this order:
+
+```bash
+# 1. Rename the GitHub repo (once, by the org owner).
+gh repo rename local-artifacts --repo SemviaIO/agent-md-server --yes
+gh repo edit SemviaIO/local-artifacts --description "Local preview host for Markdown, HTML and Claude Code Artifact pages"
+
+# 2. Pull main in the deployment checkout. The post-merge hook rebuilds, then
+#    fails to kickstart io.semvia.local-artifacts; that is expected until step 4.
+cd ~/projects/SemviaIO/agent-md-server && git pull
+
+# 3. Move the checkout and repoint origin. Run `git worktree repair` only if
+#    the checkout has linked worktrees (finishing or removing them first is simpler).
+cd .. && mv agent-md-server local-artifacts && cd local-artifacts
+git remote set-url origin https://github.com/SemviaIO/local-artifacts.git
+git worktree repair
+
+# 4. Swap the LaunchAgent, move ~/.config/agent-md-server, re-register the MCP server.
+bash scripts/migrate-from-agent-md-server.sh
+```
+
+The script unloads and removes `io.semvia.agent-md-server`, loads `io.semvia.local-artifacts` from this checkout, moves `~/.config/agent-md-server` to `~/.config/local-artifacts` (rewriting `/tmp/agent-md-server` in `config.json`), and swaps the `agent-md-server` MCP registration for `local-artifacts`. It is safe to re-run, and exits non-zero unless only the new LaunchAgent is serving <http://127.0.0.1:3333/>. Run it from a GUI login session: `launchctl bootstrap` fails over SSH. `/tmp/agent-md-server` is left alone; delete it when you like.
+
 ## Configuration
 
-The config file lives at `~/.config/agent-md-server/config.json`.
+The config file lives at `~/.config/local-artifacts/config.json`.
 
 ```json
 {
   "sources": [
     {"prefix": "plans", "root": "~/plans"},
     {"prefix": "claude/plans", "root": "~/.claude/plans", "hidden": true},
-    {"prefix": "temp", "root": "/tmp/agent-md-server"}
+    {"prefix": "temp", "root": "/tmp/local-artifacts"}
   ],
   "port": 3333,
   "host": "127.0.0.1",
@@ -65,7 +90,7 @@ Default sources when no config file is present:
 |--------|------|:-:|
 | `plans` | `~/plans` | |
 | `claude/plans` | `~/.claude/plans` | ✓ |
-| `temp` | `/tmp/agent-md-server` | |
+| `temp` | `/tmp/local-artifacts` | |
 
 One source is built in and always served, whether or not `sources` is set:
 
@@ -100,7 +125,7 @@ Any MCP-compatible agent (Claude Code, Cursor, etc.) can connect to it.
 
 ```bash
 # Claude Code
-claude mcp add --transport http --scope user agent-md-server http://127.0.0.1:3333/mcp
+claude mcp add --transport http --scope user local-artifacts http://127.0.0.1:3333/mcp
 ```
 
 The server also sends MCP `instructions` describing it as a local preview host for Markdown and HTML, so agents find it when they need to preview a page.
@@ -214,7 +239,7 @@ The repo uses checked-in git hooks in `.githooks/`. The setup script configures 
 git config core.hooksPath .githooks
 ```
 
-**`post-merge`** — When you pull changes on the `main` branch, automatically rebuilds and restarts the launchd service (`io.semvia.agent-md-server`).
+**`post-merge`** — When you pull changes on the `main` branch, automatically rebuilds and restarts the launchd service (`io.semvia.local-artifacts`).
 
 ## License
 

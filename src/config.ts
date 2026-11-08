@@ -8,17 +8,17 @@ import type { Config, SourceConfig } from "./types.js";
 
 const VALID_PREFIX = /^[a-z0-9-]+(\/[a-z0-9-]+)*$/;
 
-const CONFIG_PATH = node_path.join(
+export const CONFIG_PATH = node_path.join(
   node_os.homedir(),
   ".config",
-  "agent-md-server",
+  "local-artifacts",
   "config.json",
 );
 
 const DEFAULT_SOURCES: SourceConfig[] = [
   { prefix: "plans", root: "~/plans" },
   { prefix: "claude/plans", root: "~/.claude/plans", hidden: true },
-  { prefix: "temp", root: "/tmp/agent-md-server" },
+  { prefix: "temp", root: "/tmp/local-artifacts" },
 ];
 
 /**

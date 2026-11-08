@@ -38,7 +38,7 @@ describe("hosted .html route", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    sourceRoot = await mkdtemp(path.join(os.tmpdir(), "agent-md-server-http-"));
+    sourceRoot = await mkdtemp(path.join(os.tmpdir(), "local-artifacts-http-"));
     await writeFile(path.join(sourceRoot, "page.html"), HTML_FIXTURE, "utf-8");
     await writeFile(path.join(sourceRoot, "index.html"), FRAGMENT_FIXTURE, "utf-8");
     await writeFile(
@@ -116,7 +116,7 @@ describe("sibling assets", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    parent = await mkdtemp(path.join(os.tmpdir(), "agent-md-server-assets-"));
+    parent = await mkdtemp(path.join(os.tmpdir(), "local-artifacts-assets-"));
     sourceRoot = path.join(parent, "root");
     await mkdir(path.join(sourceRoot, "assets"), { recursive: true });
     await writeFile(path.join(sourceRoot, "index.html"), FRAGMENT_FIXTURE);
@@ -217,7 +217,7 @@ describe("live reload for hosted HTML", () => {
   let origin: string;
 
   beforeAll(async () => {
-    sourceRoot = await mkdtemp(path.join(os.tmpdir(), "agent-md-server-sse-"));
+    sourceRoot = await mkdtemp(path.join(os.tmpdir(), "local-artifacts-sse-"));
     await mkdir(path.join(sourceRoot, "assets"));
     await writeFile(path.join(sourceRoot, "index.html"), FRAGMENT_FIXTURE);
     await writeFile(path.join(sourceRoot, "assets", "style.css"), "h1 {}\n");
