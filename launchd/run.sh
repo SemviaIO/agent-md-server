@@ -4,7 +4,7 @@
 # Resolves the real Volta-pinned Node binary and exec-replaces this shell with
 # it, so the PID launchd tracks is the process that actually holds port 3333.
 # Launching via the ~/.volta/bin/node shim forks the real Node as a child,
-# which strands an orphan socket holder on `kickstart -k` — see issue #24.
+# which strands an orphan socket holder on `kickstart -k`.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

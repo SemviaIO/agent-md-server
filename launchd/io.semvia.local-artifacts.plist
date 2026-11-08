@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Template: __REPO__ is the checkout path. scripts/migrate-from-agent-md-server.sh
-  renders it into ~/Library/LaunchAgents/ and bootstraps it.
+  Template: __REPO__ is the checkout path. To install or reload, from the checkout:
+    sed "s|__REPO__|$PWD|g" launchd/io.semvia.local-artifacts.plist > ~/Library/LaunchAgents/io.semvia.local-artifacts.plist
+    launchctl bootout gui/$(id -u)/io.semvia.local-artifacts; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.semvia.local-artifacts.plist
 
   ProgramArguments runs launchd/run.sh, which resolves the real Volta-pinned
   Node binary and exec-replaces itself with it. This keeps launchd's tracked
   PID identical to the process holding port 3333 — running ~/.volta/bin/node
-  directly forks the real Node as a child and strands an orphan on restart
-  (issue #24).
+  directly forks the real Node as a child and strands an orphan on restart.
 -->
 <plist version="1.0">
 <dict>

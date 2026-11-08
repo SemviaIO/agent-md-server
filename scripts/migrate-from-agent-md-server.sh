@@ -47,12 +47,21 @@ bootstrap_agent() {
   fi
 }
 
-if [ ! -f "$REPO/dist/main.js" ]; then
-  echo "error: $REPO/dist/main.js is missing; run bash scripts/setup.sh first" >&2
+# Prechecks run before anything is torn down, so a failure leaves the old
+# LaunchAgent serving.
+if ! launchctl print "$domain" >/dev/null 2>&1; then
+  echo "error: no launchd domain $domain; run this script from a GUI login session" >&2
   exit 1
 fi
 if ! command -v claude >/dev/null 2>&1; then
   echo "error: claude CLI not on PATH; it is needed to re-register the MCP server" >&2
+  exit 1
+fi
+
+# Build this checkout so the new LaunchAgent never starts a stale dist/ that
+# still reads ~/.config/agent-md-server.
+if ! (cd "$REPO" && npm run build); then
+  echo "error: build failed; run bash scripts/setup.sh, then re-run this script" >&2
   exit 1
 fi
 
@@ -79,8 +88,7 @@ fi
 mkdir -p "$AGENTS_DIR"
 tmp="$(mktemp "${TMPDIR:-/tmp}/local-artifacts.plist.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
-sed -e "s|__REPO__|$REPO|g" -e "s|__HOME__|$HOME|g" \
-  "$REPO/launchd/$NEW_LABEL.plist" >"$tmp"
+sed "s|__REPO__|$REPO|g" "$REPO/launchd/$NEW_LABEL.plist" >"$tmp"
 
 if [ ! -f "$NEW_PLIST" ] || ! cmp -s "$tmp" "$NEW_PLIST"; then
   mv "$tmp" "$NEW_PLIST"
@@ -110,19 +118,30 @@ fail() {
 
 if loaded "$OLD_LABEL"; then fail "$OLD_LABEL is still loaded"; fi
 if [ -e "$OLD_PLIST" ]; then fail "$OLD_PLIST still exists"; fi
-if ! launchctl print "$domain/$NEW_LABEL" 2>/dev/null | grep -Eq '^[[:space:]]*pid = [0-9]+'; then
-  fail "$NEW_LABEL is not loaded with a running pid"
-fi
-
-status=""
+# The new agent is serving only when launchd's pid for it is the process
+# listening on 3333 and the root page carries its title. A bare 200 would
+# also come from an orphaned old server still holding the port. Polled,
+# since launchd may not have spawned the process yet.
+served=0
+launchd_pid=""
+listen_pid=""
 tries=0
 while [ "$tries" -lt 20 ]; do
-  status="$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)"
-  [ "$status" = "200" ] && break
+  info="$(launchctl print "$domain/$NEW_LABEL" 2>/dev/null || true)"
+  launchd_pid="$(printf '%s\n' "$info" | sed -n 's/^[[:space:]]*pid = \([0-9][0-9]*\)$/\1/p' | head -n 1)"
+  listen_pid="$(lsof -nP -iTCP:3333 -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
+  body="$(curl -s "$URL" || true)"
+  if [ -n "$launchd_pid" ] && [ "$launchd_pid" = "$listen_pid" ] \
+    && printf '%s' "$body" | grep -q '<title>local-artifacts</title>'; then
+    served=1
+    break
+  fi
   sleep 0.5
   tries=$((tries + 1))
 done
-if [ "$status" != "200" ]; then fail "GET $URL returned '${status:-no response}', not 200"; fi
+if [ "$served" -ne 1 ]; then
+  fail "$NEW_LABEL is not serving $URL (launchd pid '${launchd_pid:-none}', port 3333 listener '${listen_pid:-none}')"
+fi
 
 if [ "$failed" -ne 0 ]; then
   echo "Migration incomplete; see /tmp/local-artifacts.log" >&2
