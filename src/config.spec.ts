@@ -1,12 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-import { CLAUDE_SESSIONS_ROOT, parseSources, withBuiltinSources } from "./config.js";
+import {
+  CLAUDE_SESSIONS_ROOT,
+  CONFIG_PATH,
+  parseSources,
+  withBuiltinSources,
+} from "./config.js";
 
 const SESSIONS = {
   prefix: "claude-sessions",
   root: CLAUDE_SESSIONS_ROOT,
   hidden: true,
 };
+
+describe("default locations", () => {
+  it("reads the config from ~/.config/local-artifacts", () => {
+    expect(CONFIG_PATH.endsWith("/.config/local-artifacts/config.json")).toBe(true);
+  });
+
+  it("serves the temp source from /tmp/local-artifacts", () => {
+    const temp = parseSources(undefined).find((s) => s.prefix === "temp");
+
+    expect(temp?.root).toBe("/tmp/local-artifacts");
+  });
+});
 
 describe("built-in sources", () => {
   it("names the session tree the way Claude Code prints it", () => {

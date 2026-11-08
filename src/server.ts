@@ -75,7 +75,7 @@ export function createApp(config: Config): FastifyInstance {
   // Root index
   app.get("/", async (request, reply) => {
     void reply.type("text/html");
-    return renderListingPage("agent-md-server", request.nonce, {
+    return renderListingPage("local-artifacts", request.nonce, {
       kind: "rootIndex",
       sources: visiblePrefixes,
     });

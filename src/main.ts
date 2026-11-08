@@ -79,7 +79,7 @@ async function main() {
   await app.listen({ port: config.port, host: config.host });
 
   console.log(
-    `agent-md-server running at http://${config.host}:${config.port}/`,
+    `local-artifacts running at http://${config.host}:${config.port}/`,
   );
   console.log(
     `MCP endpoint: http://${config.host}:${config.port}/mcp`,

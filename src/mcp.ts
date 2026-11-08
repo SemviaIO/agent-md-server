@@ -72,7 +72,7 @@ export function createMcpServer(
   )?.root;
 
   const instructions = [
-    "agent-md-server is a local preview host. It serves Markdown (Mermaid diagrams rendered and validated) and HTML pages (mockups, designs, reports, Claude Code Artifact pages) to a browser, with live reload. Multi-file HTML works: CSS, JS, images, fonts and JSON beside the page are served too, and a fragment page with no doctype is wrapped into standards mode, as claude.ai does at publish time.",
+    "local-artifacts is a local preview host. It serves Markdown (Mermaid diagrams rendered and validated) and HTML pages (mockups, designs, reports, Claude Code Artifact pages) to a browser, with live reload. Multi-file HTML works: CSS, JS, images, fonts and JSON beside the page are served too, and a fragment page with no doctype is wrapped into standards mode, as claude.ai does at publish time.",
     "Workflow: write the file to disk, then call `preview` with its absolute path and open or share the URL it returns. Editing the file reloads the open page; for HTML, so does editing anything in its directory.",
     `Previewable directories: ${sourceListDescription()}.` +
       (sessionsRoot === undefined
@@ -83,7 +83,7 @@ export function createMcpServer(
   ].join("\n\n");
 
   const server = new Server(
-    { name: "agent-md-server", version: "0.1.0" },
+    { name: "local-artifacts", version: "0.1.0" },
     { capabilities: { tools: {} }, instructions },
   );
 

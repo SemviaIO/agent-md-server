@@ -61,7 +61,7 @@ describe("mcp preview", () => {
   let config: Config;
 
   beforeAll(async () => {
-    sourceRoot = await mkdtemp(path.join(os.tmpdir(), "agent-md-server-mcp-"));
+    sourceRoot = await mkdtemp(path.join(os.tmpdir(), "local-artifacts-mcp-"));
     await writeFile(path.join(sourceRoot, "doc.md"), "# hi\n");
     await writeFile(path.join(sourceRoot, "page.html"), "<h1>hi</h1>\n");
     await writeFile(path.join(sourceRoot, "notes.txt"), "hi\n");
@@ -240,6 +240,11 @@ describe("mcp preview", () => {
     const { tools } = await client.listTools();
 
     expect(tools.map((t) => t.name).sort()).toEqual(["list_paths", "preview"]);
+  });
+
+  it("identifies itself as local-artifacts", () => {
+    expect(client.getServerVersion()?.name).toBe("local-artifacts");
+    expect(client.getInstructions()).toContain("local-artifacts");
   });
 
   it("tells agents in its instructions that it previews HTML and Artifact pages", () => {

@@ -11,7 +11,7 @@ describe("watchPageDirectory", () => {
   let root: string;
 
   beforeAll(async () => {
-    root = await mkdtemp(path.join(os.tmpdir(), "agent-md-server-watch-"));
+    root = await mkdtemp(path.join(os.tmpdir(), "local-artifacts-watch-"));
     await mkdir(path.join(root, ".git"));
     await mkdir(path.join(root, "node_modules", "pkg"), { recursive: true });
     await writeFile(path.join(root, "index.html"), "<h1>hi</h1>\n");
