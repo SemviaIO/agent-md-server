@@ -39,6 +39,27 @@ async function isMarkdown(root: string, filename: string): Promise<boolean> {
   }
 }
 
+/**
+ * Hostnames this server answers to. Rebuilt per request because
+ * `config.tailscaleUrl` is resolved only after `listen()` returns, and
+ * `tailscale serve` forwards the tailnet `Host` unchanged.
+ *
+ * Entries match Fastify's `request.hostname`: lowercase, port stripped, an
+ * IPv6 literal kept in brackets.
+ */
+function allowedHostnames(config: Config): Set<string> {
+  const host = config.host.toLowerCase();
+  const allowed = new Set([
+    "localhost",
+    "127.0.0.1",
+    host.includes(":") && !host.startsWith("[") ? `[${host}]` : host,
+  ]);
+  if (config.tailscaleUrl !== undefined) {
+    allowed.add(new URL(config.tailscaleUrl).hostname.toLowerCase());
+  }
+  return allowed;
+}
+
 declare module "fastify" {
   interface FastifyRequest {
     nonce: string;
@@ -54,6 +75,19 @@ export function createApp(config: Config): FastifyInstance {
     .map((s) => s.prefix);
 
   app.decorateRequest("nonce", "");
+
+  // Host guard — must stay the first hook. A page on any other origin can
+  // rebind its hostname to 127.0.0.1 and read this server same-origin; it
+  // cannot make the browser send one of our own hostnames as `Host`. Hooks on
+  // the root instance also cover routes registered after `createApp` returns
+  // (the `/mcp` routes in main.ts).
+  app.addHook("onRequest", async (request, reply) => {
+    if (!allowedHostnames(config).has(request.hostname.toLowerCase())) {
+      return reply.code(403).send({
+        error: `Host not allowed: ${JSON.stringify(request.host)}`,
+      });
+    }
+  });
 
   // CSP hook — generate a per-request nonce and set the header
   app.addHook("onRequest", async (request, reply) => {

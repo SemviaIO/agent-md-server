@@ -137,6 +137,17 @@ or the command fails (for example, no GUI/XPC session is available), the server 
 without it and prints a warning; the advertised URL then works only if a serve rule was
 configured out of band.
 
+## Security
+
+The server answers only requests addressed to its own hostnames: `localhost`, `127.0.0.1`,
+the `--host` it binds to, and the tailnet hostname once Tailscale is set up. Any other `Host`
+header gets a 403 before a route runs. This blocks DNS rebinding, where a web page points its
+own hostname at `127.0.0.1` to read your files and the MCP endpoint as same-origin.
+
+A non-loopback `--host` must be the exact hostname clients put in the URL. Binding a wildcard
+address (`0.0.0.0`, `::`) leaves LAN clients, which address the server by an interface IP,
+with a 403.
+
 ## URL scheme
 
 ```
