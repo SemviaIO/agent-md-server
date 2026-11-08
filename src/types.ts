@@ -40,6 +40,10 @@ export interface Config {
   port: number;
   host: string;
   tailscale: boolean;
-  /** Resolved at runtime from `tailscale status --json` when tailscale is enabled. */
+  /**
+   * Resolved at startup from a MagicDNS reverse lookup when tailscale is
+   * enabled. The host guard in `createApp` reads it per request, so assigning
+   * it after `listen()` admits the tailnet hostname from then on.
+   */
   tailscaleUrl?: string;
 }

@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
-import type { AddressInfo } from "node:net";
+import net, { type AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -275,6 +275,112 @@ describe("live reload for hosted HTML", () => {
       expect(data).toBe("data: changed\n\n");
     } finally {
       clearInterval(touch);
+    }
+  });
+});
+
+describe("host guard", () => {
+  const SECRET = "secret plan body\n";
+  let sourceRoot: string;
+  let config: Config;
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    sourceRoot = await mkdtemp(path.join(os.tmpdir(), "agent-md-server-host-"));
+    await writeFile(path.join(sourceRoot, "page.html"), HTML_FIXTURE, "utf-8");
+    await writeFile(path.join(sourceRoot, "secret.md"), SECRET, "utf-8");
+
+    config = configFor(sourceRoot);
+    app = createApp(config);
+    // Registered after createApp returns, standing in for main.ts's /mcp.
+    app.get("/late", async () => "late route");
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await rm(sourceRoot, { recursive: true, force: true });
+  });
+
+  const get = (url: string, host: string) =>
+    app.inject({ method: "GET", url, headers: { host } });
+
+  it.each(["/api/plans/", "/api/plans/secret.md", "/plans/page.html", "/late"])(
+    "rejects a foreign Host on %s",
+    async (url) => {
+      const response = await get(url, "evil.example");
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toEqual({ error: 'Host not allowed: "evil.example"' });
+      expect(response.body).not.toContain("secret plan body");
+    },
+  );
+
+  it("rejects a foreign Host on the SSE route before it opens a stream", async () => {
+    const response = await get("/events/plans/page.html", "evil.example:3333");
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it("rejects a request with no Host header", async () => {
+    // inject() always fills in a Host, and Node demands one on HTTP/1.1, so
+    // send a raw HTTP/1.0 request, which may omit it.
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const { port } = app.server.address() as AddressInfo;
+    const statusLine = await new Promise<string>((resolve, reject) => {
+      const socket = net.connect(port, "127.0.0.1", () => {
+        socket.end("GET /api/plans/secret.md HTTP/1.0\r\n\r\n");
+      });
+      let raw = "";
+      socket.setEncoding("utf-8");
+      socket.on("data", (chunk: string) => (raw += chunk));
+      socket.on("end", () => resolve(raw.split("\r\n", 1)[0] ?? ""));
+      socket.on("error", reject);
+    });
+
+    expect(statusLine).toMatch(/^HTTP\/1\.[01] 403 /);
+  });
+
+  it.each(["127.0.0.1:3333", "LOCALHOST:3333", "localhost"])(
+    "serves Host %s (port ignored, case-insensitive)",
+    async (host) => {
+      const response = await get("/api/plans/secret.md", host);
+
+      expect(response.statusCode).toBe(200);
+    },
+  );
+
+  it("admits the tailnet hostname once tailscaleUrl is assigned", async () => {
+    const tailnetHost = "box.tail1234.ts.net";
+    expect((await get("/api/plans/", tailnetHost)).statusCode).toBe(403);
+
+    config.tailscaleUrl = "https://box.tail1234.ts.net/";
+    try {
+      expect((await get("/api/plans/", tailnetHost)).statusCode).toBe(200);
+    } finally {
+      delete config.tailscaleUrl;
+    }
+  });
+});
+
+describe("host guard with a non-loopback bind host", () => {
+  it.each([
+    ["devbox.local", "DevBox.local:3333"],
+    ["::1", "[::1]:3333"],
+  ])("serves the configured host %s", async (bindHost, hostHeader) => {
+    const sourceRoot = await mkdtemp(path.join(os.tmpdir(), "agent-md-server-bind-"));
+    const app = createApp({ ...configFor(sourceRoot), host: bindHost });
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/plans/",
+        headers: { host: hostHeader },
+      });
+
+      expect(response.statusCode).toBe(200);
+    } finally {
+      await app.close();
+      await rm(sourceRoot, { recursive: true, force: true });
     }
   });
 });
